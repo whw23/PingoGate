@@ -1,0 +1,4 @@
+.codegraph/
+.superpowers/
+.specify/integrations/.cache/
+.playwright-mcp

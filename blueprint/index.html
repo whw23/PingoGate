@@ -1,0 +1,1422 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PingoGate 开发蓝图</title>
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0"></script>
+  <link rel="stylesheet" href="./assets/styles.css">
+</head>
+<body>
+  <header class="docs-topbar" aria-label="顶部导航">
+    <div class="page-titlebar">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>PingoGate 开发蓝图</span>
+    </div>
+    <nav class="topbar-nav" aria-label="全站导航">
+      <a class="active" href="#page-overview" data-page-link="overview">产品</a>
+      <a href="#page-architecture" data-page-link="architecture">架构</a>
+      <a href="#page-marketplace" data-page-link="marketplace">分发</a>
+      <a href="#page-roadmap" data-page-link="roadmap">路线</a>
+      <a href="#page-appendix" data-page-link="appendix">附录</a>
+    </nav>
+    <div class="topbar-actions">
+      <button class="icon-button" type="button" data-open-search aria-label="搜索蓝图"><i data-lucide="search">⌕</i></button>
+    </div>
+    <button class="menu-toggle" type="button" id="menu-toggle" aria-label="打开导航菜单" aria-expanded="false" aria-controls="docs-side"><i data-lucide="menu">☰</i></button>
+  </header>
+
+  <div class="reading-progress" aria-hidden="true"><span></span></div>
+
+  <div class="page">
+    <div class="scrim" id="menu-scrim" hidden></div>
+    <aside class="side" id="docs-side" aria-label="页面目录">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <strong>PingoGate</strong>
+      </div>
+      <button class="search-docs" type="button" data-open-search>
+        <span>搜索蓝图</span>
+        <kbd>⌘ K</kbd>
+      </button>
+      <!-- Page switcher: mirrors the desktop top-bar tabs so the drawer can switch pages on narrow viewports.
+           Shares the data-page-link contract, so app.js picks these up automatically. -->
+      <nav class="side-pages" aria-label="页面切换">
+        <a class="active" href="#page-overview" data-page-link="overview">产品</a>
+        <a href="#page-architecture" data-page-link="architecture">架构</a>
+        <a href="#page-marketplace" data-page-link="marketplace">分发</a>
+        <a href="#page-roadmap" data-page-link="roadmap">路线</a>
+        <a href="#page-appendix" data-page-link="appendix">附录</a>
+      </nav>
+      <h2>本页目录</h2>
+      <nav>
+        <div class="nav-group">
+          <span class="nav-label">产品规划</span>
+          <a href="#vision">蓝图摘要</a>
+          <a href="#product-shape">产品形态</a>
+          <a href="#users">核心用户</a>
+          <a href="#product-workflows">核心工作流</a>
+          <a href="#north-star">终局形态</a>
+          <a href="#positioning">产品定位</a>
+          <a href="#product-boundaries">差异化与边界</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-label">阶段规划</span>
+          <a href="#development-route">当前开发路线</a>
+          <a href="#roadmap">阶段交付</a>
+          <a href="#phase-one">首个实现方向</a>
+          <a href="#decisions">已确认决策</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-label">架构设计</span>
+          <a href="#architecture">架构总览</a>
+          <a href="#principles">设计原则</a>
+          <a href="#capabilities">能力族</a>
+          <a href="#providers">Provider 范围</a>
+          <a href="#bridge">协议与上下文桥</a>
+          <a href="#platform">平台能力</a>
+          <a href="#byok">BYOK 用户自带密钥</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-label">分发与生态</span>
+          <a href="#repository">仓库与分发</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-label">附录</span>
+          <a href="#source-template">完整原文</a>
+          <a href="#sources">资料来源</a>
+        </div>
+      </nav>
+    </aside>
+
+    <main>
+      <section id="vision" class="hero" aria-labelledby="page-title" data-page="overview">
+        <div class="hero-inner">
+          <div>
+            <h1 id="page-title">PingoGate 开发蓝图</h1>
+            <p class="lead">
+              这份蓝图按我们的开发路线重新组织：先做一个能跑、可靠、可观测的 Rust + Pingora 单二进制网关，
+              再逐步补齐管理 API、平台治理、协议桥接和企业部署能力。终局仍然对齐 LiteLLM / New API 级覆盖，
+              但每一步都服务于可交付的网关骨架。
+            </p>
+            <div class="hero-actions">
+              <a class="button" href="#product-shape">查看产品形态</a>
+              <a class="button secondary" href="#product-workflows">查看核心工作流</a>
+              <a class="button secondary" href="#sources">查看资料来源</a>
+            </div>
+          </div>
+          <div class="hero-visual" aria-label="PingoGate 网关关系图">
+            <div class="map-line"></div>
+            <div class="map-line vertical"></div>
+            <div class="gateway-map">
+              <div class="map-node small">OpenAI SDK</div>
+              <div class="map-node small">Gemini SDK</div>
+              <div class="map-node small">Claude SDK</div>
+              <div class="map-node small">鉴权与策略</div>
+              <div class="map-node core">PingoGate</div>
+              <div class="map-node small">路由与计费</div>
+              <div class="map-node small">Provider</div>
+              <div class="map-node small">上下文桥</div>
+              <div class="map-node small">可观测性</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="meta-grid" aria-label="蓝图摘要指标" data-page="overview">
+        <div class="metric">
+          <strong>3</strong>
+          <span>核心 Provider 家族优先：OpenAI、Gemini、Anthropic</span>
+        </div>
+        <div class="metric">
+          <strong>4</strong>
+          <span>开发主线：网关骨架、平台基础、兼容对齐、长期生态</span>
+        </div>
+        <div class="metric">
+          <strong>1</strong>
+          <span>默认部署形态：一个 <code>pingogate</code> 二进制</span>
+        </div>
+        <div class="metric">
+          <strong>∞</strong>
+          <span>面向未来 Provider、协议、工具和 Agent 能力持续扩展</span>
+        </div>
+      </div>
+
+      <section id="product-shape" data-page="overview">
+        <div class="section-head">
+          <div>
+            <h2>产品形态</h2>
+            <p class="section-note">从轻量网关开始，逐步长成团队控制台、企业治理平台和能力仓库。</p>
+          </div>
+          <span class="tag">Product Shape</span>
+        </div>
+        <div class="grid four">
+          <article class="card soft-green">
+            <h3>开源单二进制网关</h3>
+            <p>一个 <code>pingogate</code> 接管 AI 流量。</p>
+          </article>
+          <article class="card soft-blue">
+            <h3>团队自托管控制台</h3>
+            <p>项目、Key、Provider 和用量集中管理。</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>企业 AI 流量治理平台</h3>
+            <p>预算、审计、身份和策略纳入治理。</p>
+          </article>
+          <article class="card soft-accent">
+            <h3>Provider / Proxy 能力仓库</h3>
+            <p>用 profile 和 catalog 扩展模型生态。</p>
+          </article>
+        </div>
+        <details class="mt-16">
+          <summary>展开产品形态细节</summary>
+          <div class="details-body">
+            <p>开源形态优先保证轻量部署：声明式配置、热重载、基础观测和 SDK 兼容入口。</p>
+            <p>团队形态强调日常管理：项目 Key、Provider Key、模型别名、请求日志、用量和 reload 状态。</p>
+            <p>企业形态承载长期能力：OAuth / OIDC / SSO、审计、预算、成本归因、多节点和高可用。</p>
+            <p>能力仓库让新 Provider 接入从代码改造转向可审查、可测试、可分发的 profile 或能力包。</p>
+          </div>
+        </details>
+      </section>
+
+      <section id="users" data-page="overview">
+        <div class="section-head">
+          <div>
+            <h2>核心用户</h2>
+            <p class="section-note">先围绕用户日常任务规划产品，再决定 Provider 能力进入顺序。</p>
+          </div>
+          <span class="tag">Users</span>
+        </div>
+        <div class="grid three">
+          <article class="card">
+            <h3>应用开发者</h3>
+            <p>少改代码，接入统一网关。</p>
+          </article>
+          <article class="card">
+            <h3>团队管理员</h3>
+            <p>集中管理 Key、模型和用量。</p>
+          </article>
+          <article class="card">
+            <h3>企业平台工程师</h3>
+            <p>把 AI 流量纳入基础设施治理。</p>
+          </article>
+          <article class="card">
+            <h3>AI Infra / DevOps</h3>
+            <p>关注性能、观测和故障隔离。</p>
+          </article>
+          <article class="card">
+            <h3>Provider / Proxy 贡献者</h3>
+            <p>用 profile 贡献新 Provider 支持。</p>
+          </article>
+          <article class="card">
+            <h3>产品负责人</h3>
+            <p>看清成本、趋势和能力覆盖。</p>
+          </article>
+        </div>
+        <details class="mt-16">
+          <summary>展开用户关注点</summary>
+          <div class="details-body">
+            <p>应用开发者希望沿用官方 SDK，只改 base URL、token 和模型名。</p>
+            <p>团队管理员需要项目 Key、Provider Key、模型别名、预算、日志和排障入口。</p>
+            <p>企业平台工程师关注企业身份、审计、配额、成本归因、合规留存、多节点和回滚。</p>
+            <p>AI Infra / DevOps 关注 SSE 稳定性、reload 行为、Prometheus 指标、结构化日志和 Provider 健康检查。</p>
+          </div>
+        </details>
+      </section>
+
+      <section id="product-workflows" data-page="overview">
+        <div class="section-head">
+          <div>
+            <h2>核心工作流</h2>
+            <p class="section-note">先让接入、治理和排障变顺，再谈协议桥和生态能力。</p>
+          </div>
+          <span class="tag">Workflows</span>
+        </div>
+        <div class="lane-grid" aria-label="核心产品工作流">
+          <article class="lane">
+            <h3>接入 Provider</h3>
+            <p>配置上游，验证后 reload。</p>
+          </article>
+          <article class="lane">
+            <h3>创建项目和 Key</h3>
+            <p>应用使用网关 Key，不碰上游密钥。</p>
+          </article>
+          <article class="lane">
+            <h3>替换客户端入口</h3>
+            <p>只改 base URL、token 和模型名。</p>
+          </article>
+          <article class="lane">
+            <h3>查看用量和日志</h3>
+            <p>按项目、模型和 Provider 排查。</p>
+          </article>
+          <article class="lane">
+            <h3>配置路由和 fallback</h3>
+            <p>用策略降低上游波动影响。</p>
+          </article>
+          <article class="lane">
+            <h3>管理身份和审计</h3>
+            <p>从 bootstrap 管理员走向 SSO。</p>
+          </article>
+        </div>
+        <details class="mt-16">
+          <summary>展开工作流细节</summary>
+          <div class="details-body">
+            <p>接入 Provider：添加上游 base URL、密钥、模型能力、streaming 支持和健康检查。</p>
+            <p>创建项目和 Key：为项目分配网关 Key、模型访问范围、预算和限流策略。</p>
+            <p>查看用量和日志：按项目、Key、Provider、模型、状态码、token、成本和 streaming 行为排查。</p>
+            <p>配置路由和 fallback：用模型别名、权重、健康状态、重试和回退策略管理上游波动。</p>
+            <p>管理身份和审计：从 bootstrap 管理员扩展到用户、角色、项目成员、OAuth / OIDC 和企业 SSO。</p>
+          </div>
+        </details>
+      </section>
+
+      <div class="source-tools" aria-label="完整原文控制" data-page="appendix">
+        <strong>完整原文附录</strong>
+        <a class="button secondary compact" href="#source-template">跳到附录</a>
+        <button class="button secondary compact" type="button" data-source-action="open">展开附录</button>
+        <button class="button secondary compact" type="button" data-source-action="close">收起附录</button>
+        <button class="button secondary compact" type="button" data-copy-markdown>复制 Markdown</button>
+      </div>
+
+      <section id="development-route" data-page="roadmap">
+        <div class="section-head">
+          <div>
+            <h2>当前开发路线</h2>
+            <p class="section-note">先把 PingoGate 做成可运行、可替换、可观测的基础网关，再沿着平台治理和协议能力逐层扩展。</p>
+          </div>
+          <span class="tag">Roadmap-first</span>
+        </div>
+
+        <div class="route-summary">
+          <article class="route-card focus">
+            <h3>首个实现方向：网关地基</h3>
+            <p>
+              当前只确定先从最关键的热路径切入：SDK 兼容入口、Provider 原生透传、SSE、静态网关 Key、
+              YAML 配置、Nginx 风格 reload、结构化日志、Prometheus 指标和机器可读管理 API 都是候选范围。
+              管理面可以先用 bootstrap 静态鉴权，但需要预留未来 OAuth / OIDC 接入的身份边界。
+            </p>
+            <div class="pill-row">
+              <span class="tag">OpenAI-compatible</span>
+              <span class="tag">Anthropic Messages</span>
+              <span class="tag">Gemini generateContent</span>
+              <span class="tag">Rust Admin API</span>
+            </div>
+          </article>
+
+          <div class="route-ladder" aria-label="开发路线层级">
+            <div class="route-step">
+              <div class="route-code">P1</div>
+              <div>
+                <strong>先打通数据面和管理面最小闭环</strong>
+                <span>单二进制、配置驱动、原生透传、基础鉴权、观测、热重载、Admin API 和身份抽象。</span>
+              </div>
+            </div>
+            <div class="route-step">
+              <div class="route-code">P2</div>
+              <div>
+                <strong>再补控制面</strong>
+                <span>SQLite、用户项目 Key、渠道模型管理、请求日志、控制台和第三方登录。</span>
+              </div>
+            </div>
+            <div class="route-step">
+              <div class="route-code">P3-P4</div>
+              <div>
+                <strong>对齐主流网关能力</strong>
+                <span>模型组、预算、fallback、成本核算、协议转换和上下文桥。</span>
+              </div>
+            </div>
+            <div class="route-step">
+              <div class="route-code">P5+</div>
+              <div>
+                <strong>扩展到完整平台</strong>
+                <span>文件、Batch、Realtime、Tools、Agentic APIs、多节点和企业身份。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane-grid" aria-label="路线主线">
+          <article class="lane">
+            <h3>兼容入口</h3>
+            <p>公共路径保持 SDK 友好，优先实现 OpenAI-compatible、Claude/Gemini 原生入口。</p>
+          </article>
+          <article class="lane">
+            <h3>运行时骨架</h3>
+            <p>热路径依赖不可变 RuntimeSnapshot，reload 失败不影响当前流量。</p>
+          </article>
+          <article class="lane">
+            <h3>治理能力</h3>
+            <p>Key、项目、模型、渠道、限流、用量和审计是后续平台化候选能力，具体进入哪个阶段尚未决定。</p>
+          </article>
+          <article class="lane">
+            <h3>协议桥接</h3>
+            <p>上下文桥、Realtime、Batch 和工具生态先预留边界，后续按能力族落地。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="north-star" data-page="overview">
+        <div class="section-head">
+          <div>
+            <h2>终局形态</h2>
+            <p class="section-note">终局形态用于校准阶段取舍，确保早期地基不会堵住长期平台能力。</p>
+          </div>
+          <span class="tag">North Star</span>
+        </div>
+
+        <div class="north-star">
+          <div class="north-copy">
+            <h3>一句话目标</h3>
+            <p>
+              PingoGate 是统一 AI 流量入口：对客户端保持 SDK 友好，对平台提供治理能力，
+              对 Provider 保留完整 API 家族空间，对未来协议转换和上下文桥接留出核心架构位置。
+            </p>
+
+            <div class="goal-stack" aria-label="终局目标列表">
+              <div class="goal-item">
+                <div class="goal-index">1</div>
+                <div>
+                  <strong>替代现有 LLM Gateway</strong>
+                  <span>在 OpenAI-compatible、Claude、Gemini 等入口上达到 LiteLLM / New API 级覆盖。</span>
+                </div>
+              </div>
+              <div class="goal-item">
+                <div class="goal-index">2</div>
+                <div>
+                  <strong>统一模型平台治理</strong>
+                  <span>把用户、项目、Key、渠道、模型、额度、价格、用量、审计和策略放进同一个控制面。</span>
+                </div>
+              </div>
+              <div class="goal-item">
+                <div class="goal-index">3</div>
+                <div>
+                  <strong>跨协议与跨 Provider 桥接</strong>
+                  <span>让 OpenAI Responses、Gemini Interactions、Anthropic Messages 等不同语义能够被策略化转换。</span>
+                </div>
+              </div>
+              <div class="goal-item">
+                <div class="goal-index">4</div>
+                <div>
+                  <strong>保持轻量运维模型</strong>
+                  <span>默认单二进制、声明式配置、热重载；数据库、Redis、对象存储和多节点都是可选增强。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="system-diagram" aria-label="PingoGate 终局架构图">
+            <div class="diagram-band">
+              <h3>客户端与入口</h3>
+              <div class="diagram-row">
+                <div class="diagram-box">OpenAI SDK</div>
+                <div class="diagram-box">Claude SDK</div>
+                <div class="diagram-box">Gemini SDK</div>
+                <div class="diagram-box">OpenAI-compatible Apps</div>
+              </div>
+            </div>
+            <div class="diagram-arrow">↓</div>
+            <div class="diagram-band">
+              <h3>PingoGate 数据面</h3>
+              <div class="diagram-row">
+                <div class="diagram-box">协议识别</div>
+                <div class="diagram-box">鉴权授权</div>
+                <div class="diagram-box">策略执行</div>
+                <div class="diagram-box">模型路由</div>
+              </div>
+              <div class="diagram-row three">
+                <div class="diagram-box core">请求管线<br>PingoGate Core</div>
+                <div class="diagram-box">协议转换</div>
+                <div class="diagram-box">上下文桥</div>
+              </div>
+              <div class="diagram-row">
+                <div class="diagram-box">流式处理</div>
+                <div class="diagram-box">Realtime Session</div>
+                <div class="diagram-box">文件媒体</div>
+                <div class="diagram-box">Batch Jobs</div>
+              </div>
+            </div>
+            <div class="diagram-arrow">↓</div>
+            <div class="diagram-band">
+              <h3>控制面与状态</h3>
+              <div class="diagram-row">
+                <div class="diagram-box accent">管理控制台</div>
+                <div class="diagram-box accent">租户 / 项目 / Key</div>
+                <div class="diagram-box accent">预算 / 计费 / 审计</div>
+                <div class="diagram-box accent">配置热重载</div>
+              </div>
+            </div>
+            <div class="diagram-arrow">↓</div>
+            <div class="diagram-band">
+              <h3>上游生态</h3>
+              <div class="diagram-row">
+                <div class="diagram-box">OpenAI</div>
+                <div class="diagram-box">Google Gemini</div>
+                <div class="diagram-box">Anthropic</div>
+                <div class="diagram-box">更多兼容 Provider</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="positioning" data-page="overview">
+        <div class="section-head">
+          <div>
+            <h2>产品定位</h2>
+            <p class="section-note">PingoGate 同时承担网关、平台和协议转换层三种角色。</p>
+          </div>
+          <span class="tag">网关 + 平台 + 协议层</span>
+        </div>
+        <div class="grid three">
+          <article class="card soft-green">
+            <h3>高性能 LLM 网关</h3>
+            <p>基于 Rust 和 Pingora，处理鉴权、路由、限流、重试、回退、流式传输和上游调度。</p>
+          </article>
+          <article class="card soft-blue">
+            <h3>多租户模型平台</h3>
+            <p>长期支持用户、项目、API Key、额度、预算、价格、用量、审计和管理控制台。</p>
+          </article>
+          <article class="card soft-accent">
+            <h3>多协议兼容层</h3>
+            <p>兼容 OpenAI、Anthropic、Gemini 以及 OpenAI-compatible Provider，尽量让客户端只改 base URL 和 token。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="product-boundaries" data-page="overview">
+        <div class="section-head">
+          <div>
+            <h2>差异化与边界</h2>
+            <p class="section-note">产品差异化来自高性能网关、低运维成本、治理能力和协议桥接空间。</p>
+          </div>
+          <span class="tag">Boundaries</span>
+        </div>
+        <div class="grid three">
+          <article class="card soft-green">
+            <h3>比通用代理更强</h3>
+            <p>不是只转发请求，而是治理 AI 流量。</p>
+          </article>
+          <article class="card soft-blue">
+            <h3>比平台更轻</h3>
+            <p>默认单二进制，不强制数据库。</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>比兼容层更稳</h3>
+            <p>先保留协议语义，再做转换。</p>
+          </article>
+        </div>
+        <details class="mt-16">
+          <summary>展开差异化细节</summary>
+          <div class="details-body">
+            <p>相对 LiteLLM / New API，PingoGate 的核心差异应落在 Rust + Pingora 热路径、单二进制部署、声明式 reload 和更清晰的 Provider / capability 边界。</p>
+            <p>相对普通 OpenAI-compatible proxy，PingoGate 不只追求接口兼容，还要承担项目、Key、预算、用量、审计、路由和故障治理。</p>
+            <p>相对重型平台，PingoGate 的默认形态必须轻：本地文件和内存 runtime 可启动，高级数据库、对象存储、多节点和企业身份作为增强能力进入。</p>
+          </div>
+        </details>
+      </section>
+
+      <section id="principles" data-page="architecture">
+        <div class="section-head">
+          <div>
+            <h2>设计原则</h2>
+            <p class="section-note">这些原则用于约束未来讨论，避免蓝图越做越大、越做越散。</p>
+          </div>
+          <span class="tag">长期约束</span>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <h3>单二进制优先</h3>
+            <p>默认产物是一个 <code>pingogate</code>，高级依赖只作为可选增强。</p>
+          </article>
+          <article class="card">
+            <h3>后端只用 Rust</h3>
+            <p>网关、控制面和管理 API 都在 Rust 中实现。TypeScript 只用于嵌入式控制台前端。</p>
+          </article>
+          <article class="card">
+            <h3>SDK 兼容优先</h3>
+            <p>公共路径应保持 provider-native 或 compatibility-native，不把 <code>/openai/...</code> 这类前缀作为主路径。</p>
+          </article>
+          <article class="card">
+            <h3>配置热重载优先</h3>
+            <p>运行时扩展从 Nginx 风格的声明式 reload 开始，不把动态 native plugin 当作主路线。</p>
+          </article>
+          <article class="card">
+            <h3>请求路径管线化</h3>
+            <p>Provider adapter 不拥有整个网关生命周期，只负责命名空间、能力和转换边界。</p>
+          </article>
+          <article class="card">
+            <h3>内容持久化受策略控制</h3>
+            <p>默认记录元数据和指标。完整 prompt/response 存储必须由租户或项目显式开启。</p>
+          </article>
+          <article class="card">
+            <h3>AI 工作区和产品代码分离</h3>
+            <p>仓库根目录只保留 AI 协作、规格、任务和自动化框架。网关、控制台、部署和产品文档进入独立产品工作区，避免 agent 上下文和实现代码互相污染。</p>
+          </article>
+          <article class="card">
+            <h3>不依赖 Rhai</h3>
+            <p>主架构不引入 Rhai 作为默认脚本引擎。转换能力优先使用声明式 profile、受限 predicate 和 Rust 编译后的 TransformPlan；复杂扩展未来再考虑签名 WASM。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="repository" data-page="marketplace">
+        <div class="section-head">
+          <div>
+            <h2>仓库与分发</h2>
+            <p class="section-note">PingoGate 是现代 AI coding 驱动的项目。根目录应作为 AI 协作壳，产品实现集中在独立工作区，并从同一源码生成不同分发物。</p>
+          </div>
+          <span class="tag">AI-first workspace</span>
+        </div>
+
+        <div class="grid two">
+          <article class="card soft-blue">
+            <h3>根目录职责</h3>
+            <p>根目录只放 AI 框架和协作入口：<code>AGENTS.md</code>、Spec Kit、agent skills、工作流配置、顶层说明和许可。产品代码、产品文档、构建脚本和部署模板不直接散落在根目录。</p>
+          </article>
+          <article class="card soft-green">
+            <h3>产品工作区职责</h3>
+            <p>非 AI 框架内容统一进入 <code>product/</code>，再按后端、前端、配置、部署、测试和产品文档分层。AI agent 通过规格和任务进入工作区，代码审查和发布从产品工作区产生。</p>
+          </article>
+        </div>
+
+        <div class="panel pad mt-16">
+          <pre class="repo-tree">/
+├── AGENTS.md
+├── README.md
+├── LICENSE
+├── .agents/
+├── .specify/
+├── .codegraph/
+└── product/
+    ├── backend/        # Rust gateway, admin API, crates, integration tests
+    ├── frontend/       # TypeScript management console
+    ├── proxies/        # official marketplace/catalog and proxy packages
+    ├── config/         # pingogate.yaml examples and schemas
+    ├── deploy/         # Docker, Compose, Kubernetes, Helm, systemd
+    ├── docs/           # product-facing docs and architecture notes
+    ├── tests/          # conformance, SDK compatibility, fixtures
+    └── dist/           # generated artifacts only, not hand-edited source</pre>
+        </div>
+
+        <div class="grid three mt-16">
+          <article class="card">
+            <h3>开发仓库</h3>
+            <p>主仓库保留 AI 规格、任务、蓝图和产品源码，适合 Codex / Spec Kit 持续迭代。根目录是协作层，<code>product/</code> 是实现层。</p>
+          </article>
+          <article class="card">
+            <h3>源码分发</h3>
+            <p>对外源码包可以裁剪 AI 协作目录，只保留 <code>product/</code>、许可、版本说明和必要构建入口，降低使用者理解成本。</p>
+          </article>
+          <article class="card">
+            <h3>运行分发</h3>
+            <p>发布物来自同一产品工作区：单二进制、嵌入式控制台、Docker 镜像、Compose、Kubernetes/Helm 包和示例配置。</p>
+          </article>
+          <article class="card">
+            <h3>GitHub 分发</h3>
+            <p>GitHub 是默认分发面：源码仓库承载 issue、PR、review 和 release；GitHub Releases 发布二进制、校验文件、配置样例和 changelog；容器镜像可同步发布到 GitHub Container Registry。</p>
+          </article>
+          <article class="card">
+            <h3>Marketplace / Catalog</h3>
+            <p>Proxy 分发应像 Codex / Claude Code plugin marketplace：一个 catalog 文件列出可安装条目，每个条目指向独立 proxy 包、版本、来源、能力、安装策略和签名信息。</p>
+          </article>
+          <article class="card">
+            <h3>类 Docker Hub 模型</h3>
+            <p>从用户视角，proxy marketplace 更像 Docker Hub：用户按命名空间、名称和 tag 拉取能力包，例如 <code>official/deepseek:1.0</code> 或 <code>acme/internal-openai:2026-05</code>，再在本地配置中启用。</p>
+          </article>
+          <article class="card">
+            <h3>官方仓库源</h3>
+            <p>官方源由 <code>product/proxies/catalog.json</code> 暴露，随 release 发布并由 CI 校验。用户可直接使用官方源安装经过审查的 proxy、Provider profile、兼容路由和能力声明。</p>
+          </article>
+          <article class="card">
+            <h3>自建仓库源</h3>
+            <p>企业或个人可以维护自己的 GitHub/GitLab 仓库源，暴露同样的 catalog 格式。PingoGate 通过 marketplace add / update 加载这些源，并允许按 ref、tag、sha 或签名策略固定版本。</p>
+          </article>
+          <article class="card">
+            <h3>贡献官方源</h3>
+            <p>开发者通过 PR 向官方 <code>product/proxies/</code> 增加内容。贡献必须包含 manifest、README、示例配置、兼容性测试、能力声明、维护者和安全边界，合并后进入官方 catalog。</p>
+          </article>
+          <article class="card">
+            <h3>分发仓库形态</h3>
+            <p>可以保留一个 AI-first 主仓库，同时通过 GitHub Actions 生成面向使用者的 release artifact、官方 proxy catalog 和容器镜像。需要更干净的消费体验时，再派生只含产品源码和 catalog 的 distribution repository。</p>
+          </article>
+        </div>
+
+        <div class="grid three mt-16">
+          <article class="card soft-blue">
+            <h3>默认分发产物</h3>
+            <p>官方 marketplace 起步分发 YAML/JSON profile 包，而不是 WASM。Profile 包描述 URL、headers、query、body、streaming、capabilities、示例配置和 conformance tests。</p>
+          </article>
+          <article class="card soft-green">
+            <h3>格式分工</h3>
+            <p>人写配置使用 YAML：<code>pingogate.yaml</code> 和 <code>proxy.yaml</code>。机器索引和锁定使用 JSON：<code>catalog.json</code>、<code>lock.json</code>、JSON Schema。TOML 不作为核心 profile 格式。</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>Transform 管线</h3>
+            <p>Proxy profile 应描述受限 HTTP/JSON/SSE 转换管线，显式支持 URL、header、query、body 的 set/remove/rename/default/map，而不是执行任意脚本。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="architecture" data-page="architecture">
+        <div class="section-head">
+          <div>
+            <h2>架构总览</h2>
+            <p class="section-note">把复杂系统拆成稳定层次。每一层都有自己的职责，减少 Provider 适配器变成大泥球的风险。</p>
+          </div>
+          <span class="tag">分层架构</span>
+        </div>
+
+        <div class="data-diagram" aria-label="数据面控制面状态分离架构图">
+          <article class="data-column">
+            <h3>数据面 Data Plane</h3>
+            <p>处理真实 AI 请求流量：协议识别、鉴权、路由、策略、转换、上游派发、流式响应、实时会话、观测和用量采集。</p>
+            <div class="pill-row">
+              <span class="tag">低延迟</span>
+              <span class="tag">高吞吐</span>
+              <span class="tag">热路径不可阻塞</span>
+            </div>
+          </article>
+          <article class="data-column">
+            <h3>控制面 Control Plane</h3>
+            <p>管理平台状态：管理员维护租户、Provider、渠道、模型目录、价格和证书；用户或项目负责人自助管理项目 Key、预算、用量、请求日志和数据留存策略。</p>
+            <div class="pill-row">
+              <span class="tag">管理员治理</span>
+              <span class="tag">用户自助</span>
+              <span class="tag">权限边界</span>
+            </div>
+          </article>
+          <article class="data-column">
+            <h3>状态与仓库 State</h3>
+            <p>分离能力仓库、运行配置和控制面状态。公开能力描述不存用户密钥，内容持久化必须受租户或项目策略控制。</p>
+            <div class="pill-row">
+              <span class="tag">Capability Repo</span>
+              <span class="tag">Runtime Config</span>
+              <span class="tag">Tenant State</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="section-spacer"></div>
+
+        <div class="panel pad">
+          <div class="architecture">
+            <div class="arch-row">
+              <div class="arch-label">网关基础设施层</div>
+              <div class="arch-content">监听器、TLS、域名、证书、公共入口、管理入口、超时、CORS、IP allow/deny、上游 TLS 校验。</div>
+            </div>
+            <div class="arch-row">
+              <div class="arch-label">请求管线层</div>
+              <div class="arch-content">协议识别、鉴权、上下文解析、路由、策略、请求转换、上游派发、响应转换、观测和计费。</div>
+            </div>
+            <div class="arch-row">
+              <div class="arch-label">Provider 命名空间层</div>
+              <div class="arch-content">OpenAI、Gemini、Anthropic 以及兼容 Provider 的完整 API 命名空间和能力族声明。</div>
+            </div>
+            <div class="arch-row">
+              <div class="arch-label">上下文桥层</div>
+              <div class="arch-content">状态化协议模拟、会话时间线、Provider 状态引用，以及向无状态上游的上下文 materialization。</div>
+            </div>
+            <div class="arch-row">
+              <div class="arch-label">控制面层</div>
+              <div class="arch-content">管理员管理租户、Provider Key、渠道、模型目录、价格、证书和全局策略；用户管理自己可见的项目、API Key、预算、用量、日志和留存策略；普通用户可 BYOK 自带 Provider Key 和模型（私有隔离）。</div>
+            </div>
+            <div class="arch-row">
+              <div class="arch-label">运行配置层</div>
+              <div class="arch-content">YAML 配置、能力仓库同步、配置验证、不可变 RuntimeSnapshot、原子切换、回滚。</div>
+            </div>
+            <div class="arch-row">
+              <div class="arch-label">嵌入控制台层</div>
+              <div class="arch-content">TypeScript 构建静态资源，嵌入 Rust 二进制，由 Rust 管理 API 提供权限和校验。</div>
+            </div>
+          </div>
+
+          <div class="pipeline" aria-label="长期请求管线">
+            <div class="pipe-step">入口</div>
+            <div class="pipe-step">协议识别</div>
+            <div class="pipe-step">鉴权授权</div>
+            <div class="pipe-step">路由策略</div>
+            <div class="pipe-step">请求转换</div>
+            <div class="pipe-step">上游派发</div>
+            <div class="pipe-step">响应转换</div>
+            <div class="pipe-step">上下文提交</div>
+            <div class="pipe-step">可观测性</div>
+            <div class="pipe-step">用量计费</div>
+            <div class="pipe-step">审计记录</div>
+            <div class="pipe-step">回滚状态</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="capabilities" data-page="architecture">
+        <div class="section-head">
+          <div>
+            <h2>能力族</h2>
+            <p class="section-note">PingoGate 不只按 endpoint 建模，而是按能力族建模。这样后续做路由、计费、策略和协议转换时更稳定。</p>
+          </div>
+          <span class="tag">Capability-first</span>
+        </div>
+        <div class="grid four">
+          <article class="card">
+            <h3>无状态生成</h3>
+            <p>OpenAI Chat Completions、Anthropic Messages、Gemini generateContent、DeepSeek 等 OpenAI-compatible chat。</p>
+          </article>
+          <article class="card">
+            <h3>有状态生成</h3>
+            <p>OpenAI Responses / Conversations、Google Interactions、未来 managed agent API。</p>
+          </article>
+          <article class="card">
+            <h3>实时与 Live</h3>
+            <p>OpenAI Realtime、Gemini Live，以及未来双向音频、视频、文本会话。</p>
+          </article>
+          <article class="card">
+            <h3>Embedding</h3>
+            <p>OpenAI Embeddings、Gemini Embeddings 和后续向量能力 Provider。</p>
+          </article>
+          <article class="card">
+            <h3>Batch</h3>
+            <p>OpenAI Batches、Gemini Batch API、Anthropic Message Batches。</p>
+          </article>
+          <article class="card">
+            <h3>文件与媒体</h3>
+            <p>Files、Uploads、对象存储引用、图片、音频、视频和跨 Provider 文件 materialization。</p>
+          </article>
+          <article class="card">
+            <h3>工具与 Agent</h3>
+            <p>Function calling、MCP、代码执行、computer use、搜索 grounding、managed agents。</p>
+          </article>
+          <article class="card">
+            <h3>平台管理</h3>
+            <p>模型、用量、成本、API Key、租户、项目、渠道、证书、限流。</p>
+          </article>
+        </div>
+
+        <div class="related-sources" aria-label="能力族相关资料">
+          <strong>相关资料</strong>
+          <div class="related-source-links">
+            <a href="https://developers.openai.com/api/reference/overview">OpenAI API reference</a>
+            <a href="https://ai.google.dev/gemini-api/docs">Gemini API docs</a>
+            <a href="https://ai.google.dev/gemini-api/docs/embeddings">Gemini Embeddings</a>
+            <a href="https://platform.claude.com/docs/en/api/overview">Anthropic API overview</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="providers" data-page="architecture">
+        <div class="section-head">
+          <div>
+            <h2>Provider 范围</h2>
+            <p class="section-note">长期要保留完整 API 家族的架构空间。早期可以只实现少数 endpoint，但不能把系统设计成只会聊天补全。</p>
+          </div>
+          <span class="tag">三大 API 家族</span>
+        </div>
+        <div class="panel">
+          <table class="matrix" aria-label="Provider 能力矩阵">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>近期落点</th>
+                <th>长期保留能力</th>
+                <th>设计提醒</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>OpenAI</strong></td>
+                <td><span class="ok">优先</span> Chat Completions；Responses 仅做同 Provider 原生透传的候选项。</td>
+                <td>Responses、Conversations、Realtime、Audio、Images、Videos、Embeddings、Files、Vector Stores、Batches、Fine-tuning、Evals、Models、Moderations、Assistants、项目和组织管理。</td>
+                <td>不能把 OpenAI 适配器写死成 Chat Completions 专用。</td>
+              </tr>
+              <tr>
+                <td><strong>Google Gemini</strong></td>
+                <td><span class="ok">优先</span> generateContent；Interactions 仅做同 Provider 原生透传的候选项。</td>
+                <td>Interactions、Live、Batch、Embeddings、Files、cached content、token counting、图片、音频、视频、文档理解、Veo、函数调用、搜索 grounding、URL context、代码执行、OpenAI compatibility。</td>
+                <td>generateContent 是无状态生成入口，Interactions 和 Live 需要单独的状态与会话模型。</td>
+              </tr>
+              <tr>
+                <td><strong>Anthropic</strong></td>
+                <td><span class="ok">优先</span> Messages 和 SSE streaming。</td>
+                <td>Tool use、extended thinking、vision/document inputs、prompt caching、Message Batches、Files、Models、Usage/Admin、MCP connector、computer use、Claude Managed Agents、OpenAI SDK compatibility。</td>
+                <td>Messages 更接近全上下文无状态生成，不等同于 OpenAI Responses 的 previous_response_id 模型。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="related-sources" aria-label="Provider 范围相关资料">
+          <strong>相关资料</strong>
+          <div class="related-source-links">
+            <a href="https://developers.openai.com/api/reference/overview">OpenAI API reference</a>
+            <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI data controls</a>
+            <a href="https://ai.google.dev/gemini-api/docs">Gemini API docs</a>
+            <a href="https://ai.google.dev/gemini-api/docs/interactions">Gemini Interactions</a>
+            <a href="https://platform.claude.com/docs/en/api/overview">Anthropic API overview</a>
+            <a href="https://platform.claude.com/docs/en/build-with-claude/working-with-messages">Anthropic Messages</a>
+            <a href="https://platform.claude.com/docs/en/build-with-claude/streaming">Anthropic streaming</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="bridge" data-page="architecture">
+        <div class="section-head">
+          <div>
+            <h2>协议兼容与上下文桥</h2>
+            <p class="section-note">这是 PingoGate 的长期差异点：让不同 Provider 的协议语义可以被统一治理，而不是只做 URL 转发。</p>
+          </div>
+          <span class="tag">长期核心能力</span>
+        </div>
+        <div class="grid two">
+          <article class="card soft-blue">
+            <h3>三种 API 模式</h3>
+            <ul>
+              <li>原生透传：客户端和上游使用同一 Provider 协议。</li>
+              <li>兼容表面：客户端使用 OpenAI-compatible、Claude-compatible 或 Gemini-compatible 协议。</li>
+              <li>协议桥：客户端协议和上游协议不同，需要转换请求、响应、流式事件、状态引用和用量。</li>
+            </ul>
+          </article>
+          <article class="card soft-yellow">
+            <h3>推荐转换架构</h3>
+            <p><code>Client Protocol Emulator</code> -> <code>Conversation Timeline</code> -> <code>Capability IR</code> -> <code>Upstream Materializer</code></p>
+            <p>不要为每一对协议单独堆一个庞大 converter。需要保留 Provider 特有逃生口，用于 reasoning trace、tool call、多模态、MCP 和 realtime 事件。</p>
+          </article>
+        </div>
+
+        <div class="grid three mt-16">
+          <article class="card">
+            <h3>ClientStateRef</h3>
+            <p>PingoGate 对客户端暴露的 response_id、interaction_id、session id 或自定义 conversation id。</p>
+          </article>
+          <article class="card">
+            <h3>ConversationTimeline</h3>
+            <p>有序保存用户回合、工具调用、工具结果、助手输出、推理元数据引用、附件和 Provider 响应元数据。</p>
+          </article>
+          <article class="card">
+            <h3>ContextMaterializer</h3>
+            <p>根据上游能力输出 messages、Anthropic blocks、Gemini contents、OpenAI input items、cache controls 或 Provider state ids。</p>
+          </article>
+        </div>
+
+        <details class="mt-16">
+          <summary>为什么上下文桥重要</summary>
+          <div class="details-body">
+            Codex 这类客户端可能使用 OpenAI Responses，并通过 <code>previous_response_id</code> 增量传递上下文。
+            但 DeepSeek 等上游可能只支持 Chat Completions，需要每次传完整 <code>messages</code>。
+            PingoGate 长期要能生成自己的 response id，保存必要的 conversation timeline，并在下一轮把上下文 materialize 成上游需要的完整请求。
+          </div>
+        </details>
+
+        <div class="related-sources" aria-label="协议与上下文桥相关资料">
+          <strong>相关资料</strong>
+          <div class="related-source-links">
+            <a href="https://developers.openai.com/api/reference/overview">OpenAI Responses / Conversations</a>
+            <a href="https://ai.google.dev/gemini-api/docs/interactions">Gemini Interactions</a>
+            <a href="https://platform.claude.com/docs/en/build-with-claude/working-with-messages">Anthropic Messages</a>
+            <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic prompt caching</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="platform" data-page="architecture">
+        <div class="section-head">
+          <div>
+            <h2>平台能力</h2>
+            <p class="section-note">这些能力决定 PingoGate 能不能从代理变成平台。它们不会全部进入第一阶段，但需要在架构里预留位置。</p>
+          </div>
+          <span class="tag">从代理到平台</span>
+        </div>
+        <div class="grid three">
+          <article class="card">
+            <h3>配置与热重载</h3>
+            <ul class="feature-list">
+              <li><input type="checkbox" disabled><span>加载候选配置</span></li>
+              <li><input type="checkbox" disabled><span>schema 和语义校验</span></li>
+              <li><input type="checkbox" disabled><span>解析密钥引用但不泄露密钥</span></li>
+              <li><input type="checkbox" disabled><span>构建不可变 RuntimeSnapshot</span></li>
+              <li><input type="checkbox" disabled><span>原子切换，失败不影响当前运行时</span></li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>可观测与计费</h3>
+            <ul class="feature-list">
+              <li><input type="checkbox" disabled><span>请求量、状态码、延迟、上游延迟</span></li>
+              <li><input type="checkbox" disabled><span>输入、输出、reasoning、cache token</span></li>
+              <li><input type="checkbox" disabled><span>Provider 成本、租户价格、额度消耗</span></li>
+              <li><input type="checkbox" disabled><span>Prometheus、OpenTelemetry、结构化日志</span></li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>租户与策略</h3>
+            <ul class="feature-list">
+              <li><input type="checkbox" disabled><span>Tenant、Project、User、Service Account</span></li>
+              <li><input type="checkbox" disabled><span>API Key、Policy、Routes、Channels</span></li>
+              <li><input type="checkbox" disabled><span>预算、限流、并发、数据留存</span></li>
+              <li><input type="checkbox" disabled><span>桥接、工具、实时、文件权限</span></li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>管理员与用户管理</h3>
+            <p>控制面需要同时支持企业管理员和普通用户。管理员负责全局 Provider、渠道、模型、价格、证书、reload 和审计；用户或项目负责人负责项目内 API Key、预算、用量、日志、文件和留存策略；普通用户可通过 <a href="#byok">BYOK</a> 自带 Provider Key 和模型，完全私有。Phase 1 可以使用 bootstrap 静态管理员鉴权，但管理 API 必须通过内部 Principal / AuthContext / 授权动作边界，避免未来接入 OAuth、OIDC、GitHub、Google 或企业 SSO 时改写 API 语义。</p>
+          </article>
+          <article class="card">
+            <h3>文件与媒体</h3>
+            <p>文件是基础设施，不是边缘功能。长期需要 PingoGateFileRef 统一抽象，映射租户、存储后端、Provider 文件引用、用途、类型、大小、留存和加密。</p>
+          </article>
+          <article class="card">
+            <h3>Batch Jobs</h3>
+            <p>批处理需要 job 模型：创建、上传或引用输入、路由到 Provider、轮询或回调、归一化状态、记录用量和成本、按策略保留或清理结果。</p>
+          </article>
+          <article class="card">
+            <h3>嵌入式控制台</h3>
+            <p>前端只做 TypeScript 静态资源，权限和校验留在 Rust 管理 API。控制台应区分管理员视图和用户视图：管理员处理全局配置，用户处理自己项目内的 Key、预算、用量、日志和文件。第三方登录属于长期控制台能力，前期只需要把登录结果映射到内部用户、角色、项目成员关系的模型边界留出来。</p>
+          </article>
+        </div>
+
+        <div class="related-sources" aria-label="平台能力相关资料">
+          <strong>相关资料</strong>
+          <div class="related-source-links">
+            <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI data controls</a>
+            <a href="https://developers.openai.com/api/docs/guides/realtime">OpenAI Realtime</a>
+            <a href="https://developers.openai.com/api/docs/guides/batch">OpenAI Batch</a>
+            <a href="https://ai.google.dev/gemini-api/docs/live-api">Gemini Live</a>
+            <a href="https://ai.google.dev/gemini-api/docs/batch-api">Gemini Batch</a>
+            <a href="https://platform.claude.com/docs/en/build-with-claude/batch-processing">Anthropic batch</a>
+            <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic prompt caching</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="byok" data-page="architecture">
+        <div class="section-head">
+          <div>
+            <h2>BYOK（Bring Your Own Key）</h2>
+            <p class="section-note">管理员管理平台分发的模型，普通用户也可以在平台上放置自己的 Provider Key 和模型，完全私有。</p>
+          </div>
+          <span class="tag">用户自带密钥</span>
+        </div>
+
+        <div class="grid two">
+          <article class="card soft-blue">
+            <h3>Channel Scope 分层</h3>
+            <p>在现有 Channel 模型上扩展所有权 scope：Platform Channel 由管理员管理、全平台分发；User Channel 由用户自建、仅本人可见和可用。两者共享同一套管线能力。</p>
+            <div class="pill-row">
+              <span class="tag">scope: platform</span>
+              <span class="tag">scope: user</span>
+            </div>
+          </article>
+          <article class="card soft-green">
+            <h3>完全私有隔离</h3>
+            <p>用户自带的 Key 和模型只有本人可用，不支持共享。管理员无法查看明文 Key，但可以禁用特定用户或全局的 BYOK 能力。</p>
+            <div class="pill-row">
+              <span class="tag">纯私有</span>
+              <span class="tag">加密存储</span>
+              <span class="tag">管理员可控</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="panel pad mt-16">
+          <h3>BYOK 路由逻辑</h3>
+          <div class="pipeline" aria-label="BYOK 路由管线">
+            <div class="pipe-step">请求进入</div>
+            <div class="pipe-step">鉴权</div>
+            <div class="pipe-step">识别用户身份</div>
+            <div class="pipe-step">查找 User Channel</div>
+            <div class="pipe-step">有匹配 → 用户 Key</div>
+            <div class="pipe-step">无匹配 → 平台 Channel</div>
+          </div>
+        </div>
+
+        <div class="grid three mt-16">
+          <article class="card">
+            <h3>UserProviderKey</h3>
+            <ul class="feature-list">
+              <li><input type="checkbox" disabled><span>所属用户（owner_user_id）</span></li>
+              <li><input type="checkbox" disabled><span>Provider 类型（openai / anthropic / gemini / compatible）</span></li>
+              <li><input type="checkbox" disabled><span>加密存储的 API Key</span></li>
+              <li><input type="checkbox" disabled><span>可选自定义 base_url</span></li>
+              <li><input type="checkbox" disabled><span>创建时间和最后使用时间</span></li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>UserChannel</h3>
+            <ul class="feature-list">
+              <li><input type="checkbox" disabled><span>关联 UserProviderKey</span></li>
+              <li><input type="checkbox" disabled><span>声明可用模型列表</span></li>
+              <li><input type="checkbox" disabled><span>可选模型别名映射</span></li>
+              <li><input type="checkbox" disabled><span>路由权重 / 优先级</span></li>
+              <li><input type="checkbox" disabled><span>健康检查策略</span></li>
+              <li><input type="checkbox" disabled><span>状态管理（active / disabled / error）</span></li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>策略与治理</h3>
+            <ul class="feature-list">
+              <li><input type="checkbox" disabled><span>用量统计正常、不走平台计费</span></li>
+              <li><input type="checkbox" disabled><span>请求日志和审计正常</span></li>
+              <li><input type="checkbox" disabled><span>Rate Limit 受平台策略约束</span></li>
+              <li><input type="checkbox" disabled><span>BYOK 全局 / 租户级开关</span></li>
+              <li><input type="checkbox" disabled><span>模型白名单受平台策略约束</span></li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="grid two mt-16">
+          <article class="card soft-yellow">
+            <h3>安全边界</h3>
+            <p>用户 Provider Key 加密存储，运行时解密。用户只能管理自己的 Key 和 Channel。管理 API 通过 Principal / AuthContext 边界鉴权。管理员可见 Key 元信息（类型、状态），不可见明文。</p>
+          </article>
+          <article class="card soft-accent">
+            <h3>控制台"我的模型"</h3>
+            <p>用户在控制台管理自己的 Provider Key（UI 只显示末尾 4 位）和 Channel（选择 Key → 声明模型 → 启用/禁用），查看 BYOK 请求的用量、日志和 Channel 健康状态。API 和 Web 控制台同时提供。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="roadmap" data-page="roadmap">
+        <div class="section-head">
+          <div>
+            <h2>阶段规划草案</h2>
+            <p class="section-note">当前还没有确定每个 Phase 的交付范围。下面只是候选能力分组，用来辅助后续任务拆分和优先级讨论。</p>
+          </div>
+          <span class="tag">Draft</span>
+        </div>
+        <div class="roadmap">
+          <article class="phase now">
+            <div>
+              <div class="phase-meta">
+                <span class="tag">方向候选</span>
+                <span class="tag">热路径验证</span>
+              </div>
+              <h3>首个实现方向：原生模型接口透传</h3>
+              <p>候选目标是做出第一个有用的单二进制 LLM 网关。OpenAI-compatible Chat Completions、Anthropic Messages、Gemini generateContent、SSE 透传、静态 gateway key、YAML 配置、基础热重载、结构化日志和 Prometheus 指标都还只是候选范围。</p>
+              <div class="phase-grid">
+                <div class="phase-chip">OpenAI-compatible</div>
+                <div class="phase-chip">Anthropic Messages</div>
+                <div class="phase-chip">Gemini generateContent</div>
+                <div class="phase-chip">SSE 透传</div>
+                <div class="phase-chip">YAML 配置</div>
+                <div class="phase-chip">基础观测</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="phase">
+            <div>
+              <div class="phase-meta">
+                <span class="tag">候选能力池</span>
+                <span class="tag">控制面</span>
+              </div>
+              <h3>候选能力：网关与平台基础</h3>
+              <p>Rust 管理 API、嵌入式控制台、SQLite、用户、项目、API Key、Provider/channel/model 管理、模型别名、限流、请求日志、用量记录、证书管理、基础 fallback 和 BYOK 用户自带密钥都是后续候选能力。</p>
+              <div class="phase-grid">
+                <div class="phase-chip">管理 API</div>
+                <div class="phase-chip">用户 / 项目</div>
+                <div class="phase-chip">API Key</div>
+                <div class="phase-chip">渠道模型</div>
+                <div class="phase-chip">请求日志</div>
+                <div class="phase-chip">基础 fallback</div>
+                <div class="phase-chip">BYOK</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="phase">
+            <div>
+              <div class="phase-meta">
+                <span class="tag">候选能力池</span>
+                <span class="tag">网关对齐</span>
+              </div>
+              <h3>候选能力：LiteLLM / New API 核心网关对齐</h3>
+              <p>virtual keys、团队和项目预算、模型组、权重路由、fallback/retry、成本核算、Provider 健康检查、OpenAI-compatible 统一入口、Claude/Gemini native entry，以及文本生成协议转换都需要后续排序。</p>
+              <div class="phase-grid">
+                <div class="phase-chip">Virtual keys</div>
+                <div class="phase-chip">模型组</div>
+                <div class="phase-chip">权重路由</div>
+                <div class="phase-chip">fallback/retry</div>
+                <div class="phase-chip">成本核算</div>
+                <div class="phase-chip">健康检查</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="phase">
+            <div>
+              <div class="phase-meta">
+                <span class="tag">候选能力池</span>
+                <span class="tag">长期差异点</span>
+              </div>
+              <h3>候选能力：上下文桥与有状态协议模拟</h3>
+              <p>PingoGate 生成 Responses / Interactions id、ConversationTimeline 存储、跨协议上下文 materialization、短期加密状态和内容留存策略都属于长期差异化候选能力。</p>
+              <div class="phase-grid">
+                <div class="phase-chip">ClientStateRef</div>
+                <div class="phase-chip">ConversationTimeline</div>
+                <div class="phase-chip">ContextMaterializer</div>
+                <div class="phase-chip">状态模拟</div>
+                <div class="phase-chip">加密短期状态</div>
+                <div class="phase-chip">留存策略</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="phase">
+            <div>
+              <div class="phase-meta">
+                <span class="tag">候选能力池</span>
+                <span class="tag">异步与媒体</span>
+              </div>
+              <h3>候选能力：非文本与异步能力</h3>
+              <p>文件、uploads、对象存储抽象、embeddings、batch jobs、图片、音频、视频、Provider-native vector-like asset、prompt/context cache controls 和 Provider file id mapping 需要按用户场景决定优先级。</p>
+              <div class="phase-grid">
+                <div class="phase-chip">Files / Uploads</div>
+                <div class="phase-chip">对象存储</div>
+                <div class="phase-chip">Embeddings</div>
+                <div class="phase-chip">Batch jobs</div>
+                <div class="phase-chip">多媒体</div>
+                <div class="phase-chip">文件引用映射</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="phase">
+            <div>
+              <div class="phase-meta">
+                <span class="tag">候选能力池</span>
+                <span class="tag">实时与工具</span>
+              </div>
+              <h3>候选能力：Realtime、Live、Tools 与 Agentic APIs</h3>
+              <p>双向 session 管线、OpenAI Realtime、Gemini Live、session auth、ephemeral token、tool call event bridging、MCP、computer use、代码执行、search grounding、URL context 和 managed agent surfaces 先作为架构预留。</p>
+              <div class="phase-grid">
+                <div class="phase-chip">Realtime</div>
+                <div class="phase-chip">Gemini Live</div>
+                <div class="phase-chip">Ephemeral token</div>
+                <div class="phase-chip">MCP</div>
+                <div class="phase-chip">Tool events</div>
+                <div class="phase-chip">Agentic APIs</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="phase">
+            <div>
+              <div class="phase-meta">
+                <span class="tag">候选能力池</span>
+                <span class="tag">生态</span>
+              </div>
+              <h3>候选能力：企业能力与生态</h3>
+              <p>Postgres/MySQL、Redis 协调、多节点网关、多租户 SaaS 控制、OIDC/SAML/LDAP、mTLS、ACME、完整审计、billing、能力仓库同步、签名能力包、WASM policy/converter plugin、GitHub PR 驱动的 proxy 生态、Docker Compose 和 Kubernetes 指南都尚未排期。</p>
+              <div class="phase-grid">
+                <div class="phase-chip">多节点</div>
+                <div class="phase-chip">企业身份</div>
+                <div class="phase-chip">完整审计</div>
+                <div class="phase-chip">Proxy marketplace</div>
+                <div class="phase-chip">WASM policy</div>
+                <div class="phase-chip">Kubernetes</div>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="related-sources" aria-label="阶段路线图相关资料">
+          <strong>相关资料</strong>
+          <div class="related-source-links">
+            <a href="https://github.com/BerriAI/litellm">LiteLLM repository</a>
+            <a href="https://docs.litellm.ai/docs/routing">LiteLLM routing</a>
+            <a href="https://docs.litellm.ai/docs/proxy/users">LiteLLM budgets and rate limits</a>
+            <a href="https://github.com/QuantumNous/new-api">New API repository</a>
+            <a href="https://docs.newapi.ai/en/docs/guide/wiki/basic-concepts/project-introduction">New API project introduction</a>
+            <a href="https://docs.newapi.ai/en/docs/api">New API API docs</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="phase-one" data-page="roadmap">
+        <div class="section-head">
+          <div>
+            <h2>首个实现方向</h2>
+            <p class="section-note">这里不是已承诺的 Phase 1 范围，只是当前最可能的起步方向。具体交付内容需要在后续 spec、plan 和 tasks 中确认。</p>
+          </div>
+          <span class="tag">待确认</span>
+        </div>
+
+        <div class="grid two">
+          <article class="card soft-green">
+            <h3>候选包含</h3>
+            <p class="feature-caption">这些只是首个实现方向候选，还没有进入承诺范围。</p>
+            <ul class="feature-list candidate">
+              <li><input type="checkbox" disabled><span>OpenAI-compatible Chat Completions 透传</span></li>
+              <li><input type="checkbox" disabled><span>Anthropic Messages 透传</span></li>
+              <li><input type="checkbox" disabled><span>Gemini generateContent 透传</span></li>
+              <li><input type="checkbox" disabled><span>Streaming / SSE 透传</span></li>
+              <li><input type="checkbox" disabled><span>静态 gateway key 模式</span></li>
+              <li><input type="checkbox" disabled><span>配置中的上游 key，候选支持 upstream key pass-through</span></li>
+              <li><input type="checkbox" disabled><span><code>pingogate.yaml</code></span></li>
+              <li><input type="checkbox" disabled><span>Nginx 风格 reload：配置、路由、上游、证书</span></li>
+              <li><input type="checkbox" disabled><span>机器可读 Rust Admin API：health、readiness、config validation、reload、reload status</span></li>
+              <li><input type="checkbox" disabled><span>bootstrap 静态管理员鉴权，内部使用 Principal / AuthContext / 授权动作抽象</span></li>
+              <li><input type="checkbox" disabled><span>基础结构化日志和 Prometheus 指标</span></li>
+              <li><input type="checkbox" disabled><span>file + memory runtime</span></li>
+            </ul>
+          </article>
+          <article class="card soft-accent">
+            <h3>倾向延后</h3>
+            <p class="feature-caption">这些倾向不进入首个实现方向，但最终仍需按 spec 确认。</p>
+            <ul class="feature-list deferred">
+              <li><input type="checkbox" disabled><span>跨协议转换</span></li>
+              <li><input type="checkbox" disabled><span>完整上下文桥</span></li>
+              <li><input type="checkbox" disabled><span>多租户数据库</span></li>
+              <li><input type="checkbox" disabled><span>billing 和支付</span></li>
+              <li><input type="checkbox" disabled><span>realtime/live API</span></li>
+              <li><input type="checkbox" disabled><span>batch jobs</span></li>
+              <li><input type="checkbox" disabled><span>对象存储和通用文件系统</span></li>
+              <li><input type="checkbox" disabled><span>嵌入式控制台</span></li>
+              <li><input type="checkbox" disabled><span>第三方登录、OAuth / OIDC、GitHub / Google 登录和企业 SSO</span></li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="panel pad mt-16">
+          <h3>无论首个阶段怎么切，都应守住的架构线</h3>
+          <div class="pill-row">
+            <span class="tag">公共路径保持 SDK 友好</span>
+            <span class="tag">入口做协议识别</span>
+            <span class="tag">按协议默认和模型配置路由</span>
+            <span class="tag">热路径使用不可变快照</span>
+            <span class="tag">保留 Provider 命名空间边界</span>
+            <span class="tag">指标按能力族和 Provider 打标签</span>
+            <span class="tag">管理 API 经过身份和授权抽象</span>
+            <span class="tag">不支持能力要显式返回</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="decisions" data-page="roadmap">
+        <div class="section-head">
+          <div>
+            <h2>已确认决策</h2>
+            <p class="section-note">这些是当前蓝图讨论已经沉淀下来的结论。后续如果改变，需要在蓝图中显式更新。</p>
+          </div>
+          <span class="tag">Decision log</span>
+        </div>
+        <div class="decision-list">
+          <div class="decision">
+            <strong>Phase 1 主范围</strong>
+            <span>尚未决定。当前只把 OpenAI Chat Completions、Anthropic Messages、Gemini generateContent 的原生透传视为首个实现方向的候选范围。</span>
+          </div>
+          <div class="decision">
+            <strong>Responses / Interactions</strong>
+            <span>是否进入首个阶段尚未决定；如果进入，倾向只考虑同 Provider 原生透传，不模拟状态或桥接到无状态上游。</span>
+          </div>
+          <div class="decision">
+            <strong>配置格式</strong>
+            <span>用户主配置和 proxy profile 使用 YAML；marketplace catalog、安装锁文件和 schema 使用 JSON。TOML 不作为核心 profile 格式。</span>
+          </div>
+          <div class="decision">
+            <strong>管理 API</strong>
+            <span>小型 Rust admin API 是首个实现方向的候选项，可能覆盖 health、readiness、config validation、reload 和 reload status；Phase 1 可使用 bootstrap 静态管理员鉴权，但必须经由内部 Principal / AuthContext / authorize(action, resource) 边界。</span>
+          </div>
+          <div class="decision">
+            <strong>第三方登录</strong>
+            <span>OAuth、OIDC、GitHub / Google 登录和企业 SSO 倾向延后到控制台和用户体系阶段；蓝图只要求早期管理 API 不把鉴权写死成全局 admin token 判断，未来登录结果应映射到内部用户、角色、项目成员关系和服务账号。</span>
+          </div>
+          <div class="decision">
+            <strong>管理模型</strong>
+            <span>控制面长期同时支持企业管理员和用户/项目负责人：管理员管理全局 Provider、渠道、模型、证书和 reload；用户管理自己项目内的 Key、预算、用量、日志和数据策略；普通用户可通过 BYOK 自带 Provider Key 和模型（完全私有）。</span>
+          </div>
+          <div class="decision">
+            <strong>仓库分发</strong>
+            <span>根目录作为 AI 协作壳，产品代码进入 <code>product/</code>；GitHub 承担源码协作、release 分发和 proxy/provider marketplace。用户可使用官方源、自建源，开发者可通过 PR 贡献官方 catalog。</span>
+          </div>
+          <div class="decision">
+            <strong>Proxy 分发产物</strong>
+            <span>默认分发 YAML/JSON 声明式 profile 包，描述 URL、header、query、body、streaming 和 capabilities。WASM 只作为未来高级扩展。</span>
+          </div>
+          <div class="decision">
+            <strong>脚本引擎</strong>
+            <span>放弃 Rhai 作为默认扩展路线。主路径使用声明式 TransformPlan 和 Rust 编译计划；复杂第三方逻辑未来优先考虑签名 WASM。</span>
+          </div>
+          <div class="decision">
+            <strong>控制台时机</strong>
+            <span>嵌入式 TypeScript 控制台暂未排期；倾向不进入首个实现阶段，首个阶段可只提供机器可读管理 API 和身份边界。</span>
+          </div>
+          <div class="decision">
+            <strong>延后事项</strong>
+            <span>跨协议转换、ConversationTimeline、realtime、batch、文件对象存储、billing、多租户数据库倾向延后，但最终阶段归属尚未决定，架构必须预留位置。</span>
+          </div>
+          <div class="decision">
+            <strong>BYOK（Bring Your Own Key）</strong>
+            <span>普通用户可在平台上放置自己的 Provider Key 和模型，完全私有，仅本人可用。通过 Channel Scope 分层实现：管理员管理 Platform Channel，用户自建 User Channel。BYOK 请求经过完整管线（用量统计、日志、审计、策略），但不走平台计费。Key 加密存储，管理员不可见明文。管理 API 和控制台同时提供。管理员可通过全局或租户级开关控制 BYOK 权限。</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 完整原文附录已抽离至 ./sections/source-template.html，避免主页面过大 -->
+      <section id="source-template" class="source-appendix" data-page="appendix">
+        <div class="section-head">
+          <div>
+            <h2>完整原文附录</h2>
+            <p class="section-note">完整 Markdown 原文体量较大，已归档到独立文件，按需打开。</p>
+          </div>
+          <span class="tag">Full source</span>
+        </div>
+        <div class="panel pad">
+          <p class="section-note">
+            为减小主页面体积，原文 24 节内容（包含元信息、产品形态、用户群、北极星、架构边界等）整体收录于：
+            <a href="./sections/source-template.html" target="_blank" rel="noopener">sections/source-template.html</a>。
+          </p>
+        </div>
+      </section>
+
+      <section id="sources" data-page="appendix">
+        <div class="section-head">
+          <div>
+            <h2>资料来源</h2>
+            <p class="section-note">资料链接已经放到最需要它们的章节旁边。这里保留章节跳转，不再重复列出同一批外部链接。</p>
+          </div>
+          <span class="tag">Reference</span>
+        </div>
+        <div class="panel pad">
+          <p class="section-note">
+            外部资料按上下文放在这些章节的“相关资料”块中；完整原始资料清单仍保留在“完整原文附录”的第 24 节。
+          </p>
+          <div class="reference-jumps">
+            <a class="tag" href="#capabilities">能力族</a>
+            <a class="tag" href="#providers">Provider 范围</a>
+            <a class="tag" href="#bridge">协议与上下文桥</a>
+            <a class="tag" href="#platform">平台能力</a>
+            <a class="tag" href="#roadmap">阶段路线图</a>
+            <a class="tag" href="#source-template">完整原文附录</a>
+          </div>
+        </div>
+      </section>
+
+      <footer data-page="overview">
+        <strong>阅读建议：</strong>
+        先看“产品”页理解产品形态、用户和工作流；再看“架构”页确认能力边界；最后看“路线”页讨论阶段顺序。
+      </footer>
+    </main>
+
+    <aside class="toc" aria-label="本页目录">
+      <div class="toc-title">目录</div>
+      <nav>
+        <a class="active" href="#vision">蓝图摘要</a>
+        <a href="#product-shape">产品形态</a>
+        <a href="#users">核心用户</a>
+        <a href="#product-workflows">核心工作流</a>
+        <a href="#north-star">终局形态</a>
+        <a href="#positioning">产品定位</a>
+        <a href="#product-boundaries">差异化与边界</a>
+      </nav>
+    </aside>
+  </div>
+  <dialog class="search-dialog" id="search-dialog" aria-label="搜索蓝图">
+    <form class="search-panel" method="dialog">
+      <header>
+        <input id="search-input" type="search" placeholder="搜索路线、架构、Provider、marketplace..." autocomplete="off">
+        <button class="icon-button" type="submit" aria-label="关闭搜索">×</button>
+      </header>
+      <div class="search-results" id="search-results" role="listbox"></div>
+    </form>
+  </dialog>
+  <script defer src="./assets/app.js"></script>
+</body>
+</html>

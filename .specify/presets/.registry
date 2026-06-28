@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "presets": {
+    "companion-standard": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:bfe636c7bdd3deba368c28677263e868ccff560c6a09ba5e3247ae6e12b6b46a",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.specify",
+          "speckit.clarify",
+          "speckit.plan",
+          "speckit.tasks",
+          "speckit.analyze",
+          "speckit.implement",
+          "speckit.constitution"
+        ]
+      },
+      "registered_skills": [
+        "speckit-specify",
+        "speckit-clarify",
+        "speckit-plan",
+        "speckit-tasks",
+        "speckit-analyze",
+        "speckit-implement",
+        "speckit-constitution"
+      ],
+      "installed_at": "2026-06-28T15:44:44.390699+00:00"
+    }
+  }
+}
