@@ -16,7 +16,7 @@
         architecture: ["principles", "architecture", "capabilities", "providers", "bridge", "platform"],
         marketplace: ["repository"],
         roadmap: ["development-route", "roadmap", "phase-one", "decisions"],
-        appendix: ["source-template", "sources"]
+        appendix: ["architecture-discussion", "source-template", "sources"]
       };
       const sectionPage = Object.fromEntries(
         Object.entries(pageSections).flatMap(([page, ids]) => ids.map((id) => [id, page]))

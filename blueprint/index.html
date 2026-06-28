@@ -84,6 +84,7 @@
         </div>
         <div class="nav-group">
           <span class="nav-label">附录</span>
+          <a href="#architecture-discussion">架构讨论记录</a>
           <a href="#source-template">完整原文</a>
           <a href="#sources">资料来源</a>
         </div>
@@ -1345,6 +1346,32 @@
           <div class="decision">
             <strong>BYOK（Bring Your Own Key）</strong>
             <span>普通用户可在平台上放置自己的 Provider Key 和模型，完全私有，仅本人可用。通过 Channel Scope 分层实现：管理员管理 Platform Channel，用户自建 User Channel。BYOK 请求经过完整管线（用量统计、日志、审计、策略），但不走平台计费。Key 加密存储，管理员不可见明文。管理 API 和控制台同时提供。管理员可通过全局或租户级开关控制 BYOK 权限。</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 架构讨论记录已归档至 ./sections/architecture-discussion.html -->
+      <section id="architecture-discussion" data-page="appendix">
+        <div class="section-head">
+          <div>
+            <h2>架构讨论记录</h2>
+            <p class="section-note">Provider 扩展、插件形态、转换模型与认证设计的讨论沉淀。</p>
+          </div>
+          <span class="tag">Discussion</span>
+        </div>
+        <div class="panel pad">
+          <p class="section-note">
+            本次讨论围绕 PingoGate 如何支持多 Provider 扩展展开：普通贡献者是否只需写 schema/transform、
+            插件应该以何种形态分发、转换模型如何设计，以及 Provider 认证等边界问题。
+            完整记录收录于：
+            <a href="./sections/architecture-discussion.html" target="_blank" rel="noopener">sections/architecture-discussion.html</a>。
+          </p>
+          <div class="reference-jumps">
+            <a class="tag" href="./sections/architecture-discussion.html#plugin-options" target="_blank" rel="noopener">插件形态</a>
+            <a class="tag" href="./sections/architecture-discussion.html#transform-model" target="_blank" rel="noopener">转换模型</a>
+            <a class="tag" href="./sections/architecture-discussion.html#plugin-distribution" target="_blank" rel="noopener">分发模式</a>
+            <a class="tag" href="./sections/architecture-discussion.html#auth-design" target="_blank" rel="noopener">认证设计</a>
+            <a class="tag" href="./sections/architecture-discussion.html#open-questions" target="_blank" rel="noopener">待确认问题</a>
           </div>
         </div>
       </section>

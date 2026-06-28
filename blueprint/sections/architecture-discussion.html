@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PingoGate 架构讨论记录</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+  <header class="docs-topbar" aria-label="顶部导航">
+    <div class="page-titlebar">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>PingoGate 架构讨论记录</span>
+    </div>
+    <nav class="topbar-nav" aria-label="全站导航">
+      <a href="../index.html">返回蓝图</a>
+    </nav>
+  </header>
+
+  <div class="page">
+    <main class="discussion-main">
+      <section id="discussion-overview">
+        <div class="section-head">
+          <div>
+            <h1>Provider 扩展与插件架构讨论记录</h1>
+            <p class="section-note">
+              本次讨论围绕 PingoGate 如何支持多 Provider 扩展展开：普通贡献者是否只需写 schema/transform、
+              插件应该以何种形态分发、转换模型如何设计、以及认证等边界问题。
+            </p>
+          </div>
+          <span class="tag">Discussion</span>
+        </div>
+
+        <div class="panel pad">
+          <p><strong>日期：</strong>2026-06-29</p>
+          <p><strong>状态：</strong>讨论稿，尚未形成最终 spec</p>
+          <p><strong>核心结论：</strong>倾向 M² 双向 adapter 模型，复杂转换通过预编译插件（WASM 优先）分发，简单 OpenAI-compatible 透传/改写由 Core 直接处理。</p>
+        </div>
+      </section>
+
+      <section id="project-context">
+        <div class="section-head">
+          <div>
+            <h2>项目背景</h2>
+            <p class="section-note">PingoGate 当前处于蓝图阶段，尚未进入具体实现。</p>
+          </div>
+          <span class="tag">Context</span>
+        </div>
+        <div class="grid two">
+          <article class="card soft-green">
+            <h3>目标</h3>
+            <p>基于 Rust + Pingora 的高性能 LLM Gateway / Proxy，作为 LiteLLM / New API 的替代品，统一 OpenAI、Gemini、Anthropic 等 Provider 的 AI 流量入口。</p>
+          </article>
+          <article class="card soft-blue">
+            <h3>当前状态</h3>
+            <p>仓库仅包含 HTML 蓝图与文档，无后端 Rust 代码。已有 Spec Kit 工作流（.specify/、.claude/skills/）可用于后续规格化。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="provider-extension-vision">
+        <div class="section-head">
+          <div>
+            <h2>Provider 扩展愿景</h2>
+            <p class="section-note">让普通贡献者无需深入 Rust，也能为 PingoGate 增加新的 Provider 支持。</p>
+          </div>
+          <span class="tag">Vision</span>
+        </div>
+        <div class="panel pad">
+          <p>核心主张：</p>
+          <ul>
+            <li>贡献者只写 <code>schema</code> 和 <code>transform</code>。</li>
+            <li>通过工具链或 CI/CD 把这些描述物打包成插件。</li>
+            <li>用户通过命令安装插件，无需本地 Rust 工具链。</li>
+            <li>运行期只加载插件，不解释 transform 源码。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="plugin-options">
+        <div class="section-head">
+          <div>
+            <h2>插件形态对比</h2>
+            <p class="section-note">围绕性能、安全、贡献门槛和分发方式，比较了几种候选方案。</p>
+          </div>
+          <span class="tag">Options</span>
+        </div>
+
+        <div class="grid two">
+          <article class="card">
+            <h3>内置 Rust crate</h3>
+            <p>由核心团队维护，编译进主二进制。性能最高，但贡献门槛高、发版耦合。</p>
+          </article>
+          <article class="card">
+            <h3>动态库 .so/.dylib/.dll</h3>
+            <p>接近原生性能，可热加载，但跨平台分发麻烦、无沙箱、ABI 版本管理成本高。</p>
+          </article>
+          <article class="card">
+            <h3>WASM 预编译插件</h3>
+            <p>跨平台、有沙箱、性能接近原生。需要 WASM runtime（推荐 wasmtime），工具链较复杂。</p>
+          </article>
+          <article class="card">
+            <h3>声明式模板引擎</h3>
+            <p>零工具链，适合简单字段映射，但无法表达深层重组、I/O、流式事件和状态管理。</p>
+          </article>
+        </div>
+
+        <div class="panel pad mt-16">
+          <table class="comparison-table">
+            <thead>
+              <tr>
+                <th>方案</th>
+                <th>速度</th>
+                <th>安全</th>
+                <th>扩展性</th>
+                <th>贡献门槛</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>内置 Rust</td><td>⭐⭐⭐</td><td>⭐⭐</td><td>⭐</td><td>高</td></tr>
+              <tr><td>动态库</td><td>⭐⭐⭐</td><td>⭐⭐</td><td>⭐⭐⭐</td><td>高</td></tr>
+              <tr><td>WASM</td><td>⭐⭐⭐</td><td>⭐⭐⭐</td><td>⭐⭐⭐</td><td>中</td></tr>
+              <tr><td>声明式模板</td><td>⭐⭐⭐</td><td>⭐⭐⭐</td><td>⭐</td><td>最低</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details class="mt-16">
+          <summary>展开：为什么网关场景不推荐运行时解释 transform</summary>
+          <div class="details-body">
+            <p>网关数据面要求低延迟、高吞吐。运行时解释 transform（如 Rhai、Lua）意味着每次请求都要解释执行 AST/字节码，会比编译执行慢 5~10 倍。</p>
+            <p>WASM 的优势在于可以提前编译成机器码，运行时只需边界调用和内存拷贝，延迟可控在亚毫秒级。</p>
+          </div>
+        </details>
+      </section>
+
+      <section id="transform-model">
+        <div class="section-head">
+          <div>
+            <h2>转换模型：点对点 vs Canonical</h2>
+            <p class="section-note">讨论了三种转换组织方式。</p>
+          </div>
+          <span class="tag">Model</span>
+        </div>
+
+        <div class="grid three">
+          <article class="card soft-yellow">
+            <h3>Canonical 中间格式</h3>
+            <p>所有协议先转成内部标准格式，再转成目标格式。复杂度 2N，但跨 family 请求会 ×2 转换，且 Canonical 会随能力增长而膨胀。</p>
+          </article>
+          <article class="card soft-green">
+            <h3>M² 点对点</h3>
+            <p>每个 adapter 直接表达 A → B。单次转换、语义精确，但 N 个协议最多产生 N² 种组合。</p>
+          </article>
+          <article class="card soft-blue">
+            <h3>双向 adapter</h3>
+            <p>一个模块同时处理 A ↔ B。第一阶段客户端入口固定为 OpenAI-compatible，每个上游 Provider 只需一个 openai ↔ provider 双向 adapter。</p>
+          </article>
+        </div>
+
+        <div class="panel pad mt-16">
+          <p><strong>讨论结论：</strong>倾向 M² 双向 adapter 模型。第一阶段只支持 OpenAI-compatible 客户端入口，每个 Provider 贡献一个双向 adapter；未来若开放 Anthropic/Gemini 入口，再按需补齐组合。</p>
+        </div>
+      </section>
+
+      <section id="passthrough-vs-transform">
+        <div class="section-head">
+          <div>
+            <h2>透传 vs 转换路径</h2>
+            <p class="section-note">不是所有请求都需要转换，应分层处理。</p>
+          </div>
+          <span class="tag">Path</span>
+        </div>
+
+        <div class="panel pad">
+          <pre class="path-diagram">Client Request
+    │
+    ▼
+Protocol Parse
+    │
+    ▼
+Route Match (model alias → provider)
+    │
+    ▼
+Provider Profile Resolution
+    │
+    ├─ OpenAI-compatible, no body transform ──► 透传（最快路径）
+    │
+    ├─ OpenAI-compatible, simple rewrite ──────► L1 配置层改写
+    │
+    └─ Cross-family or complex semantics ──────► 转换路径（插件）</pre>
+        </div>
+
+        <div class="grid three">
+          <article class="card soft-green">
+            <h3>透传</h3>
+            <p>只改 URL 和 auth header，body 直接流式转发。不经过任何 transform，性能最高。</p>
+          </article>
+          <article class="card soft-blue">
+            <h3>L1 配置改写</h3>
+            <p>改 model 别名、endpoint、header、query。由 Core 直接执行，无需插件。</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>插件转换</h3>
+            <p>处理跨 family 的 body/response 结构重组、流式事件、错误包装等复杂语义。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="plugin-distribution">
+        <div class="section-head">
+          <div>
+            <h2>插件分发模式</h2>
+            <p class="section-note">用户不能装 Rust，因此编译必须在贡献者侧或 CI 侧完成。</p>
+          </div>
+          <span class="tag">Distribution</span>
+        </div>
+
+        <div class="grid two">
+          <article class="card soft-green">
+            <h3>推荐：WASM 预编译分发</h3>
+            <p>贡献者仓库通过 CI 生成 .wasm，用户执行 <code>pingogate plugin add &lt;url&gt;</code> 即可下载加载。跨平台、有沙箱、用户零工具链。</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>备选：动态库预编译分发</h3>
+            <p>性能接近原生，但需要按平台分发（linux-x86_64、linux-aarch64、darwin-arm64 等），且无沙箱。</p>
+          </article>
+        </div>
+
+        <div class="panel pad mt-16">
+          <p><strong>Registry 设想：</strong></p>
+          <ul>
+            <li>集中索引分散的 Provider 仓库。</li>
+            <li>校验 schema/transform、签名、哈希。</li>
+            <li>提供官方源和自建源两种模式。</li>
+            <li>企业可配置白名单，只安装可信来源插件。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="auth-design">
+        <div class="section-head">
+          <div>
+            <h2>Provider 认证设计</h2>
+            <p class="section-note">认证由 Core 统一执行，不应写在 adapter 里。</p>
+          </div>
+          <span class="tag">Auth</span>
+        </div>
+
+        <div class="panel pad">
+          <table class="comparison-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>认证方式</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>OpenAI / DeepSeek / 多数兼容</td><td><code>Authorization: Bearer &lt;token&gt;</code></td></tr>
+              <tr><td>Azure OpenAI</td><td><code>api-key: &lt;key&gt;</code> 或 Bearer</td></tr>
+              <tr><td>Anthropic</td><td><code>x-api-key: &lt;key&gt;</code> + <code>anthropic-version</code></td></tr>
+              <tr><td>Gemini</td><td>URL query <code>?key=&lt;key&gt;</code></td></tr>
+              <tr><td>AWS Bedrock</td><td>AWS SigV4 签名</td></tr>
+              <tr><td>GCP Vertex AI</td><td>OAuth 2.0 / service account</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="panel pad mt-16">
+          <p><strong>设计原则：</strong></p>
+          <ul>
+            <li>Provider profile 声明认证类型和模板。</li>
+            <li>Core 在发请求前注入认证，adapter 不接触 Provider Key。</li>
+            <li>Gateway Key（用户访问 PingoGate）与 Provider Key（PingoGate 访问上游）严格分离。</li>
+            <li>Provider Key 优先从环境变量读取，生产环境建议对接密钥管理服务。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="final-direction">
+        <div class="section-head">
+          <div>
+            <h2>当前倾向架构</h2>
+            <p class="section-note">综合讨论后的暂定方向，待进一步确认。</p>
+          </div>
+          <span class="tag">Direction</span>
+        </div>
+
+        <div class="grid two">
+          <article class="card soft-green">
+            <h3>Core 职责</h3>
+            <p>HTTP 入口、鉴权、路由、限流、重试、日志、Provider Key 管理、L1 配置改写、透传路径。</p>
+          </article>
+          <article class="card soft-blue">
+            <h3>插件职责</h3>
+            <p>复杂 body 转换、跨 family 适配、流式事件处理、错误语义包装。以双向 adapter 形态提供。</p>
+          </article>
+        </div>
+
+        <div class="panel pad mt-16">
+          <pre class="path-diagram">Client (OpenAI SDK)
+    │
+    ▼
+PingoGate Core
+    ├── Gateway Auth (user token)
+    ├── Route (model alias → provider)
+    ├── Provider Auth injection
+    │
+    ├─ OpenAI-compatible ───────► 透传
+    │
+    └─ Gemini/Anthropic/... ────► 双向 adapter 插件
+           │
+           ▼
+      Upstream Provider</pre>
+        </div>
+      </section>
+
+      <section id="open-questions">
+        <div class="section-head">
+          <div>
+            <h2>待确认问题</h2>
+            <p class="section-note">这些问题决定后续 spec 和实现细节。</p>
+          </div>
+          <span class="tag">Open Questions</span>
+        </div>
+
+        <div class="grid two">
+          <article class="card soft-yellow">
+            <h3>插件格式</h3>
+            <p>最终选择 WASM 还是动态库？WASM 跨平台+沙箱，动态库性能略优但平台分发麻烦。</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>声明式模板</h3>
+            <p>是否保留声明式模板作为简单 Provider 的快速路径？还是统一走插件？</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>插件 I/O 权限</h3>
+            <p>插件是否允许网络 I/O？建议默认禁止，媒体下载等复杂行为由 Core adapter 提供。</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>Registry 形态</h3>
+            <p>是否建立集中 Registry？官方源与自建源如何平衡？签名策略是什么？</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>认证范围</h3>
+            <p>MVP 支持哪些 auth 类型？Bearer/Header/Query 先行，AWS SigV4 延后？</p>
+          </article>
+          <article class="card soft-yellow">
+            <h3>MVP 边界</h3>
+            <p>第一阶段是否只做 OpenAI-compatible 透传 + 一个跨 family adapter 验证插件链路？</p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
