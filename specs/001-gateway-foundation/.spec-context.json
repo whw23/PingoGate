@@ -1,0 +1,23 @@
+{
+  "workflow": "speckit",
+  "specName": "[FEATURE NAME]",
+  "branch": "001-gateway-foundation",
+  "currentStep": "specify",
+  "status": "specified",
+  "history": [
+    {
+      "step": "specify",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-06-29T08:04:49.599Z"
+    },
+    {
+      "step": "specify",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-06-29T08:13:21.162Z"
+    }
+  ]
+}
