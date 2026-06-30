@@ -2,8 +2,8 @@
   "workflow": "speckit",
   "specName": "[FEATURE NAME]",
   "branch": "001-gateway-foundation",
-  "currentStep": "tasks",
-  "status": "ready-to-implement",
+  "currentStep": "implement",
+  "status": "implementing",
   "history": [
     {
       "step": "specify",
@@ -67,6 +67,204 @@
       "kind": "start",
       "by": "extension",
       "at": "2026-06-30T01:55:29.517Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-06-30T02:34:12.294Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T001",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.442Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T002",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.491Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T003",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.540Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T004",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.586Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T005",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.634Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T006",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.684Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T007",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.733Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T008",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.780Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T009",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.826Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T010",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.874Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T011",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.921Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T012",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T02:49:30.970Z"
     }
-  ]
+  ],
+  "currentTask": "T012",
+  "task_summaries": {
+    "T001": {
+      "status": "DONE",
+      "did": "Create app/ Cargo workspace root with 8 layer crates, locked stack, workspace lints (forbid unsafe)",
+      "files": [
+        "app/Cargo.toml"
+      ]
+    },
+    "T002": {
+      "status": "DONE",
+      "did": "Add rust-toolchain.toml (stable+clippy/rustfmt) and .cargo/config.toml",
+      "files": [
+        "app/rust-toolchain.toml",
+        "app/.cargo/config.toml"
+      ]
+    },
+    "T003": {
+      "status": "DONE",
+      "did": "Add example pingogate.yaml and .env.example with env: secret refs",
+      "files": [
+        "pingogate.yaml",
+        ".env.example"
+      ]
+    },
+    "T004": {
+      "status": "DONE",
+      "did": "Configure deny.toml for license/duplicate audit",
+      "files": [
+        "deny.toml"
+      ]
+    },
+    "T005": {
+      "status": "DONE",
+      "did": "Add GitHub CI workflow: fmt/clippy -D warnings/test + console placeholder",
+      "files": [
+        ".github/workflows/ci.yml"
+      ]
+    },
+    "T006": {
+      "status": "DONE",
+      "did": "Unit-test AppError layer mapping and boundary HTTP status",
+      "files": [
+        "app/core/src/error.rs"
+      ]
+    },
+    "T007": {
+      "status": "DONE",
+      "did": "Unit-test trace-id generation/reuse and RequestContext propagation",
+      "files": [
+        "app/core/src/context.rs"
+      ]
+    },
+    "T008": {
+      "status": "DONE",
+      "did": "Implement core domain types (ProtocolKind/ProviderKind/CapabilityFamily/AuthMethod) and AppError taxonomy",
+      "files": [
+        "app/core/src/lib.rs",
+        "app/core/src/types.rs",
+        "app/core/src/error.rs",
+        "app/core/src/context.rs"
+      ]
+    },
+    "T009": {
+      "status": "DONE",
+      "did": "Implement Principal/AuthContext/authorize boundary (no global-token bypass)",
+      "files": [
+        "app/core/src/auth.rs"
+      ]
+    },
+    "T010": {
+      "status": "DONE",
+      "did": "Implement SecretResolver trait + EnvSecretResolver and redacting SecretString",
+      "files": [
+        "app/storage/src/secret.rs",
+        "app/core/src/secret.rs"
+      ]
+    },
+    "T011": {
+      "status": "DONE",
+      "did": "Implement pingogate.yaml serde schema, semantic validation, immutable RuntimeSnapshot + ArcSwap holder",
+      "files": [
+        "app/config/src/model.rs",
+        "app/config/src/validate.rs",
+        "app/config/src/snapshot.rs"
+      ]
+    },
+    "T012": {
+      "status": "DONE",
+      "did": "Implement ProviderAdapter trait, AuthMethod, and openai/anthropic/gemini adapters declaring generation.stateless",
+      "files": [
+        "app/provider/src/adapter.rs"
+      ]
+    }
+  }
 }

@@ -1,0 +1,18 @@
+[package]
+name = "pingo-config"
+description = "pingogate.yaml schema, validation, and immutable RuntimeSnapshot."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pingo-core = { workspace = true }
+pingo-storage = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+arc-swap = { workspace = true }
+thiserror = { workspace = true }

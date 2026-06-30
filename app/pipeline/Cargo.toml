@@ -1,0 +1,17 @@
+[package]
+name = "pingo-pipeline"
+description = "Request pipeline layer: ProxyHttp implementation and filter stages."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pingo-core = { workspace = true }
+pingo-config = { workspace = true }
+pingo-provider = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

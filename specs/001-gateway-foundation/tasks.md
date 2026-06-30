@@ -20,11 +20,11 @@
 
 **Purpose**: 创建 `app/` Cargo workspace 与顶层入口，锁定依赖，配置 CI/lint。
 
-- [ ] T001 Create `app/Cargo.toml` workspace root with crates: `core`, `config`, `storage`, `provider`, `pipeline`, `listener`, `admin`, `pingogate` per [plan.md](./plan.md)
-- [ ] T002 [P] Create workspace-level `.cargo/config.toml` and `rust-toolchain.toml` (latest stable, clippy deny warnings)
-- [ ] T003 [P] Add root `pingogate.yaml` example and `.env.example` in repository root
-- [ ] T004 [P] Configure `deny.toml` for license/duplicate crate audit
-- [ ] T005 Add GitHub workflow `.github/workflows/ci.yml` running `cargo check/clippy/test` and console/CI placeholder
+- [x] T001 Create `app/Cargo.toml` workspace root with crates: `core`, `config`, `storage`, `provider`, `pipeline`, `listener`, `admin`, `pingogate` per [plan.md](./plan.md)
+- [x] T002 [P] Create workspace-level `.cargo/config.toml` and `rust-toolchain.toml` (latest stable, clippy deny warnings)
+- [x] T003 [P] Add root `pingogate.yaml` example and `.env.example` in repository root
+- [x] T004 [P] Configure `deny.toml` for license/duplicate crate audit
+- [x] T005 Add GitHub workflow `.github/workflows/ci.yml` running `cargo check/clippy/test` and console/CI placeholder
 
 ---
 
@@ -36,16 +36,16 @@
 
 ### Tests for Foundation（先写并失败）
 
-- [ ] T006 [P] Unit test `AppError` layer mapping in `app/core/src/error.rs` — domain → application → HTTP boundary
-- [ ] T007 Unit test trace-id generation and propagation helpers in `app/core/src/context.rs`
+- [x] T006 [P] Unit test `AppError` layer mapping in `app/core/src/error.rs` — domain → application → HTTP boundary
+- [x] T007 Unit test trace-id generation and propagation helpers in `app/core/src/context.rs`
 
 ### Implementation for Foundation
 
-- [ ] T008 [P] Implement `app/core/src/lib.rs` — shared domain types: `ProtocolKind`, `CapabilityFamily`, `ProviderKind`, `AppError`, `RequestContext`, `GatewayError`
-- [ ] T009 [P] Implement `app/core/src/auth.rs` — `Principal`, `AuthContext`, `authorize(action, resource)` boundary
-- [ ] T010 [P] Implement `app/storage/src/lib.rs` — `SecretResolver` trait + `env:` reference resolver; no plaintext logging
-- [ ] T011 Implement `app/config/src/lib.rs` — `pingogate.yaml` serde schema, semantic validation, `RuntimeSnapshot` builder, ArcSwap holder
-- [ ] T012 Implement `app/provider/src/lib.rs` — `ProviderAdapter` trait, `AuthMethod` descriptor, provider-native error shapes; three adapter stubs (openai/anthropic/gemini) declaring `generation.stateless`
+- [x] T008 [P] Implement `app/core/src/lib.rs` — shared domain types: `ProtocolKind`, `CapabilityFamily`, `ProviderKind`, `AppError`, `RequestContext`, `GatewayError`
+- [x] T009 [P] Implement `app/core/src/auth.rs` — `Principal`, `AuthContext`, `authorize(action, resource)` boundary
+- [x] T010 [P] Implement `app/storage/src/lib.rs` — `SecretResolver` trait + `env:` reference resolver; no plaintext logging
+- [x] T011 Implement `app/config/src/lib.rs` — `pingogate.yaml` serde schema, semantic validation, `RuntimeSnapshot` builder, ArcSwap holder
+- [x] T012 Implement `app/provider/src/lib.rs` — `ProviderAdapter` trait, `AuthMethod` descriptor, provider-native error shapes; three adapter stubs (openai/anthropic/gemini) declaring `generation.stateless`
 - [ ] T013 Implement `app/listener/src/lib.rs` — Pingora `HttpProxy` service factory and admin `ServeHttp` service factory
 - [ ] T014 Implement `app/pipeline/src/lib.rs` — `ProxyHttp` implementation wiring: `request_filter` → `upstream_peer` → `upstream_request_filter` → response/error filters; logging with trace-id
 - [ ] T015 Implement `app/admin/src/lib.rs` — Admin HTTP handler with `authorize` boundary and endpoint dispatch stub

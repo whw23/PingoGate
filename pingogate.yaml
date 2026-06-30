@@ -1,0 +1,58 @@
+# PingoGate example configuration (single declarative source, FR-017).
+# Human authoring in YAML; secret values are referenced, never inlined.
+# Copy and adapt; see specs/001-gateway-foundation/contracts/config-schema.md.
+
+listeners:
+  public:
+    address: "0.0.0.0:8080"
+  admin:
+    address: "127.0.0.1:9090"
+
+gateway_keys:
+  - name: "team-alpha"
+    secret_ref: "env:PINGO_KEY_ALPHA"
+    enabled: true
+
+providers:
+  - name: "openai-main"
+    kind: "openai-compatible"
+    base_url: "https://api.openai.com"
+    auth:
+      method: "bearer"
+      key_ref: "env:OPENAI_API_KEY"
+    capability_families: ["generation.stateless"]
+
+  - name: "anthropic-main"
+    kind: "anthropic"
+    base_url: "https://api.anthropic.com"
+    anthropic_version: "2023-06-01"
+    auth:
+      method: "api_key_header"
+      key_ref: "env:ANTHROPIC_API_KEY"
+    capability_families: ["generation.stateless"]
+
+  - name: "gemini-main"
+    kind: "gemini"
+    base_url: "https://generativelanguage.googleapis.com"
+    auth:
+      method: "query_key"
+      key_ref: "env:GEMINI_API_KEY"
+    capability_families: ["generation.stateless"]
+
+routes:
+  - alias: "gpt-4o"
+    provider: "openai-main"
+    upstream_model: "gpt-4o"
+  - alias: "claude"
+    provider: "anthropic-main"
+    upstream_model: "claude-3-5-sonnet-latest"
+  - alias: "gemini-pro"
+    provider: "gemini-main"
+    upstream_model: "gemini-1.5-pro"
+
+observability:
+  metrics:
+    label_by_principal: false
+
+upstream:
+  timeout_ms: 60000

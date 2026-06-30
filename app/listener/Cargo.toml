@@ -1,0 +1,14 @@
+[package]
+name = "pingo-listener"
+description = "Gateway infrastructure layer: public and admin Pingora service factories."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pingo-config = { workspace = true }
+pingo-pipeline = { workspace = true }

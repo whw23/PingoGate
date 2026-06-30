@@ -1,0 +1,6 @@
+# Workspace cargo configuration.
+# Lint levels are declared in the workspace `Cargo.toml` ([workspace.lints]);
+# CI promotes warnings to errors with `cargo clippy -- -D warnings`.
+
+[term]
+verbose = false

@@ -1,0 +1,16 @@
+[package]
+name = "pingo-admin"
+description = "Control plane layer: Admin API with authorize boundary and reload orchestration."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pingo-core = { workspace = true }
+pingo-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
