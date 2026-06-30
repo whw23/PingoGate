@@ -2,8 +2,8 @@
   "workflow": "speckit",
   "specName": "[FEATURE NAME]",
   "branch": "001-gateway-foundation",
-  "currentStep": "plan",
-  "status": "planned",
+  "currentStep": "tasks",
+  "status": "ready-to-implement",
   "history": [
     {
       "step": "specify",
@@ -53,6 +53,20 @@
       "kind": "start",
       "by": "extension",
       "at": "2026-06-29T11:27:28.952Z"
+    },
+    {
+      "step": "tasks",
+      "substep": null,
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-30T01:55:29.469Z"
+    },
+    {
+      "step": "tasks",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-06-30T01:55:29.517Z"
     }
   ]
 }
