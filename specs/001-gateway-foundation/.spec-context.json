@@ -2,8 +2,8 @@
   "workflow": "speckit",
   "specName": "[FEATURE NAME]",
   "branch": "001-gateway-foundation",
-  "currentStep": "specify",
-  "status": "specified",
+  "currentStep": "plan",
+  "status": "planned",
   "history": [
     {
       "step": "specify",
@@ -25,6 +25,34 @@
       "kind": "complete",
       "by": "ai",
       "at": "2026-06-29T11:01:20.660Z"
+    },
+    {
+      "step": "plan",
+      "substep": "research",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-29T11:22:20.364Z"
+    },
+    {
+      "step": "plan",
+      "substep": "design",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-29T11:26:44.892Z"
+    },
+    {
+      "step": "plan",
+      "substep": null,
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-06-29T11:26:44.944Z"
+    },
+    {
+      "step": "plan",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-06-29T11:27:28.952Z"
     }
   ]
 }

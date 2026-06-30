@@ -165,7 +165,7 @@ PingoGate 网关地基面向三类核心角色：**应用开发者**（把流量
 #### 可观测性
 
 - **FR-031**: 系统 MUST 输出结构化日志，字段命名一致，且每条请求携带可贯穿管线全程的请求/追踪 ID。
-- **FR-032**: 系统 MUST 暴露机器可读、可被常见监控系统抓取的指标端点（Prometheus 兼容），至少覆盖请求量、状态码、延迟、上游延迟与 token 计数（输入/输出，可得时）。
+- **FR-032**: 系统 MUST 暴露机器可读、可被常见监控系统抓取的指标端点（Prometheus 兼容），至少覆盖请求量、状态码、延迟、上游延迟与 token 计数（输入/输出，以及上游可提供时的 reasoning / cache token）。
 - **FR-033**: 指标 MUST 按能力族与 Provider 打标签；MAY 额外按网关 Key 主体标识（principal id，非明文密钥）归因。
 - **FR-034**: 所有敏感值（网关 Key、Provider Key、token）MUST 在日志与指标输出中脱敏，MUST NOT 以明文出现。
 
@@ -227,6 +227,7 @@ PingoGate 网关地基面向三类核心角色：**应用开发者**（把流量
 ### 默认取舍
 
 - **上游密钥来源**：首阶段以「配置中声明的上游 Provider Key」为主路径；蓝图提到的「客户端 upstream key pass-through」视为可选/延后能力，默认关闭，不阻塞 MVP。
+- **转换路径范围**：本阶段透传路径仅做「协议识别 → 路由 → 认证注入」，body 原样流式转发。蓝图附录《架构讨论记录》中的「L1 配置改写」（由 Core 直接改写 model 别名以外的 endpoint / header / query）与跨 family 插件转换均**不在本阶段**，归入未来 Provider profile 改写与插件能力；仅「模型别名 → Provider/上游」的映射（FR-014）属本阶段。
 - **运行时后端**：首阶段使用 file + memory，不引入 SQLite/Postgres 等持久化后端。
 - **TLS / 证书**：监听器与上游 TLS 属网关基础设施层；上游 TLS 证书默认校验（受控开发环境可显式禁用）。证书的完整生命周期管理（ACME 等）延后。
 - **性能预算**：沿用宪法延迟预算（无状态透传网关开销 < 5 ms p50 / 20 ms p95）作为 SC-003 的可度量目标。
@@ -243,5 +244,6 @@ PingoGate 网关地基面向三类核心角色：**应用开发者**（把流量
 - **Realtime / Live / Tools / Agentic（蓝图 P5+ 候选）**：双向 session 管线、OpenAI Realtime、Gemini Live、ephemeral token、tool call 事件桥接、MCP、computer use、代码执行、search grounding、URL context、managed agent。
 - **企业能力与生态（蓝图 P5+ 候选）**：多节点/高可用、Redis 协调、OIDC/SAML/LDAP、mTLS、ACME、完整审计、billing/支付、能力仓库同步、签名能力包、WASM policy/converter 插件、proxy marketplace/catalog/registry、GitHub PR 驱动的 proxy 生态、Docker Compose / Kubernetes / Helm 指南。
 - **BYOK 子系统**：Channel Scope 分层（platform/user）、`UserProviderKey`、`UserChannel`、用户「我的模型」控制台——延后到控制面阶段。
+- **Provider 扩展插件架构（蓝图附录《架构讨论记录》，P5+ 候选）**：`blueprint/sections/architecture-discussion.html` 沉淀的 M² 双向 adapter 模型、「透传 / L1 配置改写 / 插件转换」三层路径、WASM 优先的预编译插件分发（动态库备选）、插件 I/O 权限（默认禁止网络）、插件 Registry（官方源/自建源、签名、哈希校验、企业白名单），以及该记录中的 6 个待确认问题（插件格式、声明式模板取舍、插件 I/O 权限、Registry 形态、认证范围与 AWS SigV4 / GCP Vertex OAuth 延后、MVP 边界）。其中**「MVP 边界」一问在本 spec 已定调**：网关地基阶段为纯原生透传 + 路由 + 认证注入，**不含**跨 family adapter 或转换插件链路；插件架构整体延后，由后续独立 spec 承接。认证方面，本阶段仅实现蓝图三大家族所需的 Bearer / `x-api-key`+版本头 / URL query key（FR-012），Azure `api-key`、AWS SigV4、GCP Vertex OAuth 等随其 Provider 一并延后。
 
 > 架构约束：尽管上述能力不在本阶段实现，网关地基的架构 MUST 为其预留位置（保留 Provider 命名空间边界、能力族建模、身份/授权边界、不可变快照热路径、按能力族打标签的指标），不得做成「只会聊天补全」的封闭设计。
