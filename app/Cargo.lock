@@ -1283,13 +1283,17 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 name = "pingo-admin"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "http",
  "pingo-config",
  "pingo-core",
+ "pingo-pipeline",
+ "pingo-storage",
  "pingora",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -1311,6 +1315,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1329,6 +1335,8 @@ name = "pingo-pipeline"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
+ "http",
  "pingo-config",
  "pingo-core",
  "pingo-provider",
@@ -1366,6 +1374,7 @@ dependencies = [
  "pingo-provider",
  "pingo-storage",
  "pingora",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

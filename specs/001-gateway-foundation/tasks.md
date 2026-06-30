@@ -63,24 +63,24 @@
 
 ### Tests for User Story 1（先写并失败）
 
-- [ ] T017 [P] [US1] Contract test: OpenAI Chat Completions passthrough in `app/pingogate/tests/contract_openai_passthrough.rs`
-- [ ] T018 [P] [US1] Contract test: Anthropic Messages passthrough in `app/pingogate/tests/contract_anthropic_passthrough.rs`
-- [ ] T019 [P] [US1] Contract test: Gemini generateContent passthrough in `app/pingogate/tests/contract_gemini_passthrough.rs`
-- [ ] T020 [P] [US1] Integration test: SSE streaming for OpenAI-compatible and Anthropic in `app/pingogate/tests/integration_sse.rs`
-- [ ] T021 [P] [US1] Contract test: invalid gateway key returns mirrored OpenAI-shaped error in `app/pingogate/tests/contract_auth_error.rs`
-- [ ] T022 [P] [US1] Contract test: unknown model alias returns mirrored "no route" error in `app/pingogate/tests/contract_route_error.rs`
-- [ ] T023 [P] [US1] Contract test: unsupported capability family returns explicit error in `app/pingogate/tests/contract_unsupported_capability.rs`
+- [x] T017 [P] [US1] Contract test: OpenAI Chat Completions passthrough in `app/pingogate/tests/contract_openai_passthrough.rs`
+- [x] T018 [P] [US1] Contract test: Anthropic Messages passthrough in `app/pingogate/tests/contract_anthropic_passthrough.rs`
+- [x] T019 [P] [US1] Contract test: Gemini generateContent passthrough in `app/pingogate/tests/contract_gemini_passthrough.rs`
+- [x] T020 [P] [US1] Integration test: SSE streaming for OpenAI-compatible and Anthropic in `app/pingogate/tests/integration_sse.rs`
+- [x] T021 [P] [US1] Contract test: invalid gateway key returns mirrored OpenAI-shaped error in `app/pingogate/tests/contract_auth_error.rs`
+- [x] T022 [P] [US1] Contract test: unknown model alias returns mirrored "no route" error in `app/pingogate/tests/contract_route_error.rs`
+- [x] T023 [P] [US1] Contract test: unsupported capability family returns explicit error in `app/pingogate/tests/contract_unsupported_capability.rs`
 
 ### Implementation for User Story 1
 
-- [ ] T024 [P] [US1] Implement protocol detection in `app/pipeline/src/protocol.rs` (OpenAI-compatible / Anthropic / Gemini)
-- [ ] T025 [P] [US1] Implement gateway key authentication in `app/pipeline/src/auth_filter.rs`
-- [ ] T026 [P] [US1] Implement model alias routing in `app/pipeline/src/router.rs`
-- [ ] T027 [P] [US1] Implement upstream auth injection in `app/pipeline/src/upstream_auth.rs` (Bearer / x-api-key / query key)
-- [ ] T028 [P] [US1] Implement provider error shape renderers in `app/provider/src/openai.rs`, `app/provider/src/anthropic.rs`, `app/provider/src/gemini.rs`
-- [ ] T029 [US1] Implement mirrored gateway error response in `app/pipeline/src/error_response.rs`
-- [ ] T030 [US1] Implement SSE byte-stream passthrough in `app/pipeline/src/streaming.rs`
-- [ ] T031 [US1] Integrate `pipeline` filters into `ProxyHttp` implementation in `app/pipeline/src/proxy.rs`
+- [x] T024 [P] [US1] Implement protocol detection in `app/pipeline/src/protocol.rs` (OpenAI-compatible / Anthropic / Gemini)
+- [x] T025 [P] [US1] Implement gateway key authentication in `app/pipeline/src/auth_filter.rs`
+- [x] T026 [P] [US1] Implement model alias routing in `app/pipeline/src/router.rs`
+- [x] T027 [P] [US1] Implement upstream auth injection in `app/pipeline/src/upstream_auth.rs` (Bearer / x-api-key / query key)
+- [x] T028 [P] [US1] Implement provider error shape renderers in `app/provider/src/openai.rs`, `app/provider/src/anthropic.rs`, `app/provider/src/gemini.rs`
+- [x] T029 [US1] Implement mirrored gateway error response in `app/pipeline/src/error_response.rs`
+- [x] T030 [US1] Implement SSE byte-stream passthrough in `app/pipeline/src/streaming.rs`
+- [x] T031 [US1] Integrate `pipeline` filters into `ProxyHttp` implementation in `app/pipeline/src/proxy.rs`
 
 **Checkpoint**: User Story 1 独立可运行并可通过其全部契约/集成测试；quickstart 步骤 4 成功。
 
@@ -94,19 +94,19 @@
 
 ### Tests for User Story 2（先写并失败）
 
-- [ ] T032 [P] [US2] Integration test: `SIGHUP` reload adds a new route in `app/pingogate/tests/integration_reload_signal.rs`
-- [ ] T033 [P] [US2] Integration test: invalid candidate config rejected, active snapshot unchanged in `app/pingogate/tests/integration_reload_rejected.rs`
-- [ ] T034 [P] [US2] Integration test: in-flight requests bind old snapshot during reload in `app/pingogate/tests/integration_reload_in_flight.rs`
-- [ ] T035 [P] [US2] Contract test: `pingogate.yaml` semantic validation errors in `app/config/tests/validation_test.rs`
+- [x] T032 [P] [US2] Integration test: `SIGHUP` reload adds a new route in `app/pingogate/tests/integration_reload_signal.rs`
+- [x] T033 [P] [US2] Integration test: invalid candidate config rejected, active snapshot unchanged in `app/pingogate/tests/integration_reload_rejected.rs`
+- [x] T034 [P] [US2] Integration test: in-flight requests bind old snapshot during reload in `app/pingogate/tests/integration_reload_in_flight.rs`
+- [x] T035 [P] [US2] Contract test: `pingogate.yaml` semantic validation errors in `app/config/tests/validation_test.rs`
 
 ### Implementation for User Story 2
 
-- [ ] T036 [P] [US2] Implement `RuntimeSnapshot` immutable builder and ArcSwap atomic switch in `app/config/src/snapshot.rs`
-- [ ] T037 [P] [US2] Implement schema + semantic validation in `app/config/src/validate.rs` (route provider existence, key refs resolvable, unique names)
-- [ ] T038 [P] [US2] Implement reload orchestrator in `app/admin/src/reload.rs` (load → validate → build → swap → record status)
-- [ ] T039 [US2] Implement SIGHUP handler in `app/pingogate/src/signal.rs`
-- [ ] T040 [US2] Implement optional file-watch reload trigger in `app/pingogate/src/watch.rs`
-- [ ] T041 [US2] Implement `ReloadStatus` in-memory store in `app/admin/src/status.rs`
+- [x] T036 [P] [US2] Implement `RuntimeSnapshot` immutable builder and ArcSwap atomic switch in `app/config/src/snapshot.rs`
+- [x] T037 [P] [US2] Implement schema + semantic validation in `app/config/src/validate.rs` (route provider existence, key refs resolvable, unique names)
+- [x] T038 [P] [US2] Implement reload orchestrator in `app/admin/src/reload.rs` (load → validate → build → swap → record status)
+- [x] T039 [US2] Implement SIGHUP handler in `app/pingogate/src/signal.rs`
+- [x] T040 [US2] Implement optional file-watch reload trigger in `app/pingogate/src/watch.rs`
+- [x] T041 [US2] Implement `ReloadStatus` in-memory store in `app/admin/src/status.rs`
 
 **Checkpoint**: User Story 2 独立可测试；重载成功/失败/在途请求三种场景均通过。
 
@@ -120,20 +120,20 @@
 
 ### Tests for User Story 3（先写并失败）
 
-- [ ] T042 [P] [US3] Contract test: healthz/readyz return machine-readable states in `app/admin/tests/contract_health.rs`
-- [ ] T043 [P] [US3] Contract test: config-validate accepts/rejects config without mutating runtime in `app/admin/tests/contract_validate.rs`
-- [ ] T044 [P] [US3] Contract test: reload endpoint triggers reload and returns version/rollback target in `app/admin/tests/contract_reload.rs`
-- [ ] T045 [P] [US3] Contract test: reload status endpoint reflects last result in `app/admin/tests/contract_reload_status.rs`
-- [ ] T046 [P] [US3] Contract test: missing/invalid admin credentials rejected for every endpoint in `app/admin/tests/contract_admin_auth.rs`
+- [x] T042 [P] [US3] Contract test: healthz/readyz return machine-readable states in `app/admin/tests/contract_health.rs`
+- [x] T043 [P] [US3] Contract test: config-validate accepts/rejects config without mutating runtime in `app/admin/tests/contract_validate.rs`
+- [x] T044 [P] [US3] Contract test: reload endpoint triggers reload and returns version/rollback target in `app/admin/tests/contract_reload.rs`
+- [x] T045 [P] [US3] Contract test: reload status endpoint reflects last result in `app/admin/tests/contract_reload_status.rs`
+- [x] T046 [P] [US3] Contract test: missing/invalid admin credentials rejected for every endpoint in `app/admin/tests/contract_admin_auth.rs`
 
 ### Implementation for User Story 3
 
-- [ ] T047 [P] [US3] Implement bootstrap admin credentials provider in `app/admin/src/bootstrap.rs` (maps to `Principal`/`AuthContext`)
-- [ ] T048 [US3] Implement admin request router and handler in `app/admin/src/handler.rs`
-- [ ] T049 [US3] Wire admin `ServeHttp` service into `app/listener/src/admin.rs`
-- [ ] T050 [US3] Implement `/config/validate` endpoint using `config::validate` without touching active snapshot
-- [ ] T051 [US3] Implement `/reload` endpoint delegating to reload orchestrator
-- [ ] T052 [US3] Implement `/reload/status` endpoint reading `ReloadStatus`
+- [x] T047 [P] [US3] Implement bootstrap admin credentials provider in `app/admin/src/bootstrap.rs` (maps to `Principal`/`AuthContext`)
+- [x] T048 [US3] Implement admin request router and handler in `app/admin/src/handler.rs`
+- [x] T049 [US3] Wire admin `ServeHttp` service into `app/listener/src/admin.rs`
+- [x] T050 [US3] Implement `/config/validate` endpoint using `config::validate` without touching active snapshot
+- [x] T051 [US3] Implement `/reload` endpoint delegating to reload orchestrator
+- [x] T052 [US3] Implement `/reload/status` endpoint reading `ReloadStatus`
 
 **Checkpoint**: User Story 3 独立可测试；所有端点鉴权边界覆盖，无全局 token 等值分支。
 
@@ -147,17 +147,17 @@
 
 ### Tests for User Story 4（先写并失败）
 
-- [ ] T053 [P] [US4] Unit test: metrics labels contain provider + capability family in `app/pipeline/src/metrics.rs`
-- [ ] T054 [P] [US4] Integration test: Prometheus endpoint returns expected counters/histograms in `app/pingogate/tests/integration_metrics.rs`
-- [ ] T055 [P] [US4] Unit test: structured logs include trace-id and no plaintext keys in `app/pipeline/src/logging.rs`
+- [x] T053 [P] [US4] Unit test: metrics labels contain provider + capability family in `app/pipeline/src/metrics.rs`
+- [x] T054 [P] [US4] Integration test: Prometheus endpoint returns expected counters/histograms in `app/pingogate/tests/integration_metrics.rs`
+- [x] T055 [P] [US4] Unit test: structured logs include trace-id and no plaintext keys in `app/pipeline/src/logging.rs`
 
 ### Implementation for User Story 4
 
-- [ ] T056 [P] [US4] Implement trace-id generation and `tracing` span injection in `app/core/src/trace.rs`
-- [ ] T057 [P] [US4] Implement Prometheus metrics recorder in `app/pipeline/src/metrics.rs` (request count, status, latency, upstream latency, token count)
-- [ ] T058 [P] [US4] Implement token counting hooks in `app/provider/src/usage.rs` (input/output/reasoning/cache when available)
-- [ ] T059 [P] [US4] Implement sensitive-value redaction layer in `app/core/src/redact.rs`
-- [ ] T060 [US4] Wire metrics endpoint into admin listener in `app/admin/src/metrics_endpoint.rs`
+- [x] T056 [P] [US4] Implement trace-id generation and `tracing` span injection in `app/core/src/trace.rs`
+- [x] T057 [P] [US4] Implement Prometheus metrics recorder in `app/pipeline/src/metrics.rs` (request count, status, latency, upstream latency, token count)
+- [x] T058 [P] [US4] Implement token counting hooks in `app/provider/src/usage.rs` (input/output/reasoning/cache when available)
+- [x] T059 [P] [US4] Implement sensitive-value redaction layer in `app/core/src/redact.rs`
+- [x] T060 [US4] Wire metrics endpoint into admin listener in `app/admin/src/metrics_endpoint.rs`
 
 **Checkpoint**: User Story 4 独立可测试；日志/指标抽样审计 0 密钥泄漏。
 
@@ -167,14 +167,14 @@
 
 **Purpose**: 跨故事优化、基准、安全复核、文档与 quickstart 验证。
 
-- [ ] T061 [P] Run `cargo clippy -- -D warnings` and fix all issues across `app/`
-- [ ] T062 [P] Run `cargo fmt --check` and fix formatting
-- [ ] T063 [P] Implement end-to-end quickstart validation in `app/pingogate/tests/e2e_quickstart.rs`
-- [ ] T064 Run throughput/latency benchmark against stub upstreams and record p50/p95 (target: <5 ms p50 / <20 ms p95)
-- [ ] T065 [P] Security-review pass: verify no plaintext keys in logs/metrics/config responses, `authorize` boundary enforced, upstream TLS default-on
-- [ ] T066 [P] Update `README.md` with build/run/quickstart instructions
-- [ ] T067 Verify `.github/workflows/ci.yml` passes `cargo check/clippy/test`
-- [ ] T068 Run `speckit-verify` (or `/verify`) against quickstart scenarios
+- [x] T061 [P] Run `cargo clippy -- -D warnings` and fix all issues across `app/`
+- [x] T062 [P] Run `cargo fmt --check` and fix formatting
+- [x] T063 [P] Implement end-to-end quickstart validation in `app/pingogate/tests/e2e_quickstart.rs`
+- [x] T064 Run throughput/latency benchmark against stub upstreams and record p50/p95 (target: <5 ms p50 / <20 ms p95)
+- [x] T065 [P] Security-review pass: verify no plaintext keys in logs/metrics/config responses, `authorize` boundary enforced, upstream TLS default-on
+- [x] T066 [P] Update `README.md` with build/run/quickstart instructions
+- [x] T067 Verify `.github/workflows/ci.yml` passes `cargo check/clippy/test`
+- [x] T068 Run `speckit-verify` (or `/verify`) against quickstart scenarios
 
 ---
 

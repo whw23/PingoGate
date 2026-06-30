@@ -1,41 +1,45 @@
 //! The gateway's `ProxyHttp` implementation (constitution VI; research R1).
 //!
-//! Stage wiring is established here. Protocol identification, model routing,
-//! body passthrough, SSE streaming and mirrored error bodies are filled in by
-//! User Story 1 (tasks T024–T031). This phase authenticates the gateway key and
-//! binds each in-flight request to the snapshot loaded at `new_ctx` time, so a
-//! concurrent reload never disturbs requests already in progress (FR-021).
+//! Wires the fixed pipeline: protocol identification → gateway-key auth →
+//! model routing → upstream-auth injection → body/SSE passthrough → mirrored
+//! error → observability. Each in-flight request is pinned to the snapshot it
+//! loaded at `new_ctx` time, so a concurrent reload never disturbs it (FR-021).
+//! Request bodies are NOT transformed: the inbound path/body are forwarded
+//! verbatim; routing only selects the upstream provider. Pingora-facing
+//! adapters live in [`crate::wire`].
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use pingo_config::{RuntimeSnapshot, SnapshotHolder};
-use pingo_core::{RequestContext, TraceId, TRACE_HEADER};
-use pingora::http::RequestHeader;
-use pingora::proxy::{ProxyHttp, Session};
+use bytes::Bytes;
+use pingo_config::SnapshotHolder;
+use pingo_core::{AppError, CapabilityFamily, ProtocolKind, TraceId, TRACE_HEADER};
+use pingora::http::{RequestHeader, ResponseHeader};
+use pingora::proxy::{FailToProxy, ProxyHttp, Session};
 use pingora::upstreams::peer::HttpPeer;
 use pingora::{Error, ErrorType, Result};
-use tracing::info;
 
-/// The gateway proxy. Holds the snapshot holder so each request reads the
-/// active configuration through a lock-free `ArcSwap` load.
+use crate::ctx::GatewayCtx;
+use crate::metrics::Metrics;
+use crate::observe;
+use crate::protocol::{self, Detected, Detection};
+use crate::streaming;
+use crate::upstream_auth::{UpstreamAuth, GATEWAY_KEY_HEADERS};
+use crate::upstream_peer::{resolve_route, UpstreamTarget};
+use crate::wire;
+
+/// The gateway proxy. Reads the active configuration through a lock-free
+/// `ArcSwap` load per request, and records observability signals via `metrics`.
 pub struct GatewayProxy {
     holder: Arc<SnapshotHolder>,
+    metrics: Arc<Metrics>,
 }
 
 impl GatewayProxy {
-    pub fn new(holder: Arc<SnapshotHolder>) -> Self {
-        Self { holder }
+    pub fn new(holder: Arc<SnapshotHolder>, metrics: Arc<Metrics>) -> Self {
+        Self { holder, metrics }
     }
-}
-
-/// Per-request state shared across pipeline phases.
-pub struct GatewayCtx {
-    /// Snapshot pinned for this request's whole lifetime (reload-safe).
-    pub snapshot: Arc<RuntimeSnapshot>,
-    pub request: RequestContext,
-    /// Name of the authenticated gateway key, once authenticated.
-    pub gateway_key_name: Option<String>,
 }
 
 #[async_trait]
@@ -43,81 +47,221 @@ impl ProxyHttp for GatewayProxy {
     type CTX = GatewayCtx;
 
     fn new_ctx(&self) -> Self::CTX {
-        GatewayCtx {
-            snapshot: self.holder.load(),
-            request: RequestContext::new(TraceId::generate()),
-            gateway_key_name: None,
-        }
+        GatewayCtx::new(self.holder.load())
     }
 
-    /// Phase 1: trace id propagation + gateway-key authentication. Routing and
-    /// protocol identification are layered on in US1.
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        let inbound_trace = header_str(session.req_header(), TRACE_HEADER);
+        let inbound_trace = wire::header_str(session.req_header(), TRACE_HEADER);
         ctx.request.trace_id = TraceId::from_header(inbound_trace.as_deref());
 
-        let Some(presented) = presented_gateway_key(session.req_header()) else {
-            session.respond_error(401).await?;
-            return Ok(true);
-        };
-        match ctx.snapshot.authenticate_gateway_key(&presented) {
-            Some(entry) => {
-                ctx.gateway_key_name = Some(entry.name.clone());
-                ctx.request.principal = Some(entry.name.clone());
+        match prepare(session, ctx).await? {
+            Some((protocol, err)) => {
+                wire::respond_rendered(session, protocol, &err).await?;
+                Ok(true)
             }
-            None => {
-                session.respond_error(401).await?;
-                return Ok(true);
-            }
+            None => Ok(false),
         }
-
-        // Model routing and passthrough are implemented in US1 (T024–T031).
-        // Until then the data path is explicitly "not implemented" rather than
-        // silently misrouting an authenticated request.
-        session.respond_error(501).await?;
-        Ok(true)
     }
 
-    /// Phase 2 (required): choose the upstream. Unreachable until US1 wires
-    /// routing, because `request_filter` currently short-circuits every request.
     async fn upstream_peer(
         &self,
         _session: &mut Session,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        Err(Error::explain(
-            ErrorType::InternalError,
-            "upstream routing not yet implemented (US1)",
-        ))
+        let target = ctx.upstream.clone().ok_or_else(|| {
+            Error::explain(ErrorType::InternalError, "no upstream resolved for request")
+        })?;
+        let peer = HttpPeer::new(target.addr.as_str(), target.tls, target.sni);
+        Ok(Box::new(peer))
     }
 
-    /// Phase 5: structured per-request log carrying the trace id (constitution XIX).
-    async fn logging(&self, _session: &mut Session, e: Option<&Error>, ctx: &mut Self::CTX) {
-        info!(
-            trace_id = ctx.request.trace_id.as_str(),
-            principal = ctx.gateway_key_name.as_deref().unwrap_or("-"),
-            error = e.map(|e| e.to_string()).as_deref().unwrap_or("none"),
-            "request completed"
+    async fn upstream_request_filter(
+        &self,
+        _session: &mut Session,
+        upstream_request: &mut RequestHeader,
+        ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        ctx.upstream_started = Some(Instant::now());
+        let Some(provider_name) = ctx.route_provider.clone() else {
+            return Ok(());
+        };
+        let Some(provider) = ctx.snapshot.provider(&provider_name) else {
+            return Ok(());
+        };
+        let base_path = ctx.upstream.as_ref().map(|t| t.base_path.clone());
+        let host = ctx.upstream.as_ref().map(|t| t.sni.clone());
+
+        for header in GATEWAY_KEY_HEADERS {
+            upstream_request.remove_header(header);
+        }
+        let original = upstream_request
+            .uri
+            .path_and_query()
+            .map(|pq| pq.as_str().to_string())
+            .unwrap_or_else(|| "/".to_string());
+        let mut path = format!("{}{}", base_path.unwrap_or_default(), original);
+
+        let auth = UpstreamAuth::build(
+            provider.auth_method,
+            provider.key.expose(),
+            provider.anthropic_version.as_deref(),
+        );
+        wire::apply_upstream_auth(upstream_request, auth, &mut path)?;
+        if let Some(host) = host {
+            upstream_request.insert_header("host", host.as_str())?;
+        }
+        if let Ok(uri) = path.parse::<http::Uri>() {
+            upstream_request.set_uri(uri);
+        }
+        Ok(())
+    }
+
+    async fn upstream_response_filter(
+        &self,
+        _session: &mut Session,
+        upstream_response: &mut ResponseHeader,
+        ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        let content_type = upstream_response
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok());
+        if streaming::response_is_streaming(content_type) {
+            ctx.streaming = true;
+        }
+        Ok(())
+    }
+
+    async fn fail_to_proxy(
+        &self,
+        session: &mut Session,
+        e: &Error,
+        ctx: &mut Self::CTX,
+    ) -> FailToProxy {
+        let provider = ctx
+            .route_provider
+            .clone()
+            .unwrap_or_else(|| "upstream".to_string());
+        let err = match e.etype() {
+            ErrorType::ConnectTimedout | ErrorType::ReadTimedout | ErrorType::WriteTimedout => {
+                AppError::UpstreamTimeout { provider }
+            }
+            _ => AppError::UpstreamUnavailable { provider },
+        };
+        let status = err.http_status();
+        if session.as_downstream().response_written().is_none() {
+            let _ = wire::respond_rendered(session, ctx.protocol, &err).await;
+        }
+        FailToProxy {
+            error_code: status,
+            can_reuse_downstream: false,
+        }
+    }
+
+    /// Tap the response stream to capture token usage (bounded, non-persisting)
+    /// without altering the bytes relayed to the client (constitution XX).
+    fn response_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> Result<Option<Duration>> {
+        if let Some(chunk) = body.as_ref() {
+            observe::capture_chunk(ctx, chunk);
+        }
+        if end_of_stream {
+            observe::finish_capture(ctx);
+        }
+        Ok(None)
+    }
+
+    async fn logging(&self, session: &mut Session, e: Option<&Error>, ctx: &mut Self::CTX) {
+        let status = session
+            .as_downstream()
+            .response_written()
+            .map(|resp| resp.status.as_u16())
+            .unwrap_or(0);
+        let error = e.map(|e| e.to_string());
+        observe::complete(
+            &self.metrics,
+            ctx,
+            status,
+            error.as_deref().unwrap_or("none"),
         );
     }
 }
 
-/// Read a request header value as an owned `String`.
-fn header_str(req: &RequestHeader, name: &str) -> Option<String> {
-    req.headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
+/// Identify, authenticate and route the request, buffering the body when
+/// routing needs it. Returns `Some((protocol, err))` to short-circuit with a
+/// mirrored error, or `None` to proceed to the upstream.
+async fn prepare(
+    session: &mut Session,
+    ctx: &mut GatewayCtx,
+) -> Result<Option<(Option<ProtocolKind>, AppError)>> {
+    let req = session.req_header();
+    let method = req.method.as_str().to_string();
+    let path = req
+        .uri
+        .path_and_query()
+        .map(|pq| pq.as_str().to_string())
+        .unwrap_or_default();
+    let authz = wire::header_str(req, "authorization");
+    let x_api_key = wire::header_str(req, "x-api-key");
+
+    let detection = protocol::detect(&method, &path);
+    let protocol = wire::detection_protocol(&detection);
+    let detected: Detected = match detection {
+        Detection::Unidentified => return Ok(Some((None, AppError::UnknownProtocol))),
+        Detection::UnsupportedCapability { family, .. } => {
+            if let Some(err) = ctx.authenticate(authz.as_deref(), x_api_key.as_deref()) {
+                return Ok(Some((protocol, err)));
+            }
+            return Ok(Some((protocol, AppError::UnsupportedCapability { family })));
+        }
+        Detection::Supported(detected) => detected,
+    };
+
+    if let Some(err) = ctx.authenticate(authz.as_deref(), x_api_key.as_deref()) {
+        return Ok(Some((protocol, err)));
+    }
+
+    let (model, body) = match wire::extract_model_and_body(session, detected.protocol, &path).await
+    {
+        Ok(pair) => pair,
+        Err(err) => return Ok(Some((protocol, err))),
+    };
+    let Some(alias) = model else {
+        let err = AppError::Validation {
+            message: "request is missing the 'model' field".to_string(),
+        };
+        return Ok(Some((protocol, err)));
+    };
+
+    match resolve_route(&ctx.snapshot, &alias) {
+        Ok((provider, target)) => {
+            commit_route(ctx, detected, provider, target, body);
+            Ok(None)
+        }
+        Err(err) => Ok(Some((protocol, err))),
+    }
 }
 
-/// Extract the gateway key the client presented: `Authorization: Bearer <k>`
-/// (OpenAI / Gemini style) or `x-api-key: <k>` (Anthropic style). It is matched
-/// against the snapshot, then stripped before forwarding upstream in US1 (FR-010).
-fn presented_gateway_key(req: &RequestHeader) -> Option<String> {
-    if let Some(auth) = header_str(req, "authorization") {
-        if let Some(rest) = auth.strip_prefix("Bearer ") {
-            return Some(rest.trim().to_string());
-        }
-    }
-    header_str(req, "x-api-key")
+/// Record the resolved route and streaming flag on the request context.
+fn commit_route(
+    ctx: &mut GatewayCtx,
+    detected: Detected,
+    provider: String,
+    target: UpstreamTarget,
+    body: Option<Vec<u8>>,
+) {
+    ctx.streaming =
+        streaming::request_is_streaming(detected.streaming_by_path, body.as_deref().unwrap_or(b""));
+    ctx.protocol = Some(detected.protocol);
+    ctx.request.protocol = Some(detected.protocol);
+    ctx.request.provider = Some(provider.clone());
+    // This phase serves a single capability family; label metrics by it (FR-033).
+    ctx.request.capability_family = Some(CapabilityFamily::GenerationStateless);
+    ctx.route_provider = Some(provider);
+    ctx.upstream = Some(target);
 }

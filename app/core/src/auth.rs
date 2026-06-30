@@ -94,6 +94,9 @@ impl Resource {
     pub fn admin_endpoint(name: impl Into<String>) -> Self {
         Self::new(ResourceKind::AdminEndpoint, name)
     }
+    pub fn config() -> Self {
+        Self::new(ResourceKind::Config, "config")
+    }
 }
 
 /// An authenticated session that decides what its [`Principal`] may do.
