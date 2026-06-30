@@ -46,10 +46,10 @@
 - [x] T010 [P] Implement `app/storage/src/lib.rs` — `SecretResolver` trait + `env:` reference resolver; no plaintext logging
 - [x] T011 Implement `app/config/src/lib.rs` — `pingogate.yaml` serde schema, semantic validation, `RuntimeSnapshot` builder, ArcSwap holder
 - [x] T012 Implement `app/provider/src/lib.rs` — `ProviderAdapter` trait, `AuthMethod` descriptor, provider-native error shapes; three adapter stubs (openai/anthropic/gemini) declaring `generation.stateless`
-- [ ] T013 Implement `app/listener/src/lib.rs` — Pingora `HttpProxy` service factory and admin `ServeHttp` service factory
-- [ ] T014 Implement `app/pipeline/src/lib.rs` — `ProxyHttp` implementation wiring: `request_filter` → `upstream_peer` → `upstream_request_filter` → response/error filters; logging with trace-id
-- [ ] T015 Implement `app/admin/src/lib.rs` — Admin HTTP handler with `authorize` boundary and endpoint dispatch stub
-- [ ] T016 Implement `app/pingogate/src/main.rs` — bootstrap assembly: load config, start listeners, signal handlers, ArcSwap wiring
+- [x] T013 Implement `app/listener/src/lib.rs` — Pingora `HttpProxy` service factory and admin `ServeHttp` service factory
+- [x] T014 Implement `app/pipeline/src/lib.rs` — `ProxyHttp` implementation wiring: `request_filter` → `upstream_peer` → `upstream_request_filter` → response/error filters; logging with trace-id
+- [x] T015 Implement `app/admin/src/lib.rs` — Admin HTTP handler with `authorize` boundary and endpoint dispatch stub
+- [x] T016 Implement `app/pingogate/src/main.rs` — bootstrap assembly: load config, start listeners, signal handlers, ArcSwap wiring
 
 **Checkpoint**: Foundation crate-level `cargo test` passes; config validates example `pingogate.yaml`; snapshot ArcSwap stores/loads.
 

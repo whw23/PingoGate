@@ -122,7 +122,9 @@ pub struct Upstream {
 
 impl Default for Upstream {
     fn default() -> Self {
-        Self { timeout_ms: default_timeout_ms() }
+        Self {
+            timeout_ms: default_timeout_ms(),
+        }
     }
 }
 

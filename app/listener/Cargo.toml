@@ -10,5 +10,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+pingo-core = { workspace = true }
 pingo-config = { workspace = true }
 pingo-pipeline = { workspace = true }
+pingo-admin = { workspace = true }
+pingora = { workspace = true }

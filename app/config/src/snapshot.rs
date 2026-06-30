@@ -62,10 +62,12 @@ impl RuntimeSnapshot {
 
         let mut providers = HashMap::with_capacity(config.providers.len());
         for (i, p) in config.providers.iter().enumerate() {
-            let key = resolver.resolve(&p.auth.key_ref).map_err(|e| ConfigError::Secret {
-                path: format!("providers[{i}].auth.key_ref"),
-                source: e,
-            })?;
+            let key = resolver
+                .resolve(&p.auth.key_ref)
+                .map_err(|e| ConfigError::Secret {
+                    path: format!("providers[{i}].auth.key_ref"),
+                    source: e,
+                })?;
             providers.insert(
                 p.name.clone(),
                 ResolvedProvider {
@@ -97,14 +99,26 @@ impl RuntimeSnapshot {
             if !gk.enabled {
                 continue;
             }
-            let secret = resolver.resolve(&gk.secret_ref).map_err(|e| ConfigError::Secret {
-                path: format!("gateway_keys[{i}].secret_ref"),
-                source: e,
-            })?;
-            gateway_keys.insert(secret.expose().to_string(), GatewayKeyEntry { name: gk.name.clone() });
+            let secret = resolver
+                .resolve(&gk.secret_ref)
+                .map_err(|e| ConfigError::Secret {
+                    path: format!("gateway_keys[{i}].secret_ref"),
+                    source: e,
+                })?;
+            gateway_keys.insert(
+                secret.expose().to_string(),
+                GatewayKeyEntry {
+                    name: gk.name.clone(),
+                },
+            );
         }
 
-        Ok(Arc::new(Self { version, providers, routes, gateway_keys }))
+        Ok(Arc::new(Self {
+            version,
+            providers,
+            routes,
+            gateway_keys,
+        }))
     }
 
     pub fn version(&self) -> u64 {
@@ -148,7 +162,9 @@ pub struct SnapshotHolder {
 
 impl SnapshotHolder {
     pub fn new(initial: Arc<RuntimeSnapshot>) -> Self {
-        Self { inner: ArcSwap::from(initial) }
+        Self {
+            inner: ArcSwap::from(initial),
+        }
     }
 
     /// Load the active snapshot. In-flight requests keep their loaded `Arc`
@@ -196,13 +212,19 @@ routes:
         let snap = build_snapshot();
         assert_eq!(snap.version(), 1);
         assert_eq!(snap.route("gpt-4o").unwrap().upstream_model, "gpt-4o");
-        assert_eq!(snap.provider("openai-main").unwrap().auth_method, AuthMethod::Bearer);
+        assert_eq!(
+            snap.provider("openai-main").unwrap().auth_method,
+            AuthMethod::Bearer
+        );
     }
 
     #[test]
     fn disabled_gateway_key_is_skipped_and_secret_not_required() {
         let snap = build_snapshot();
-        assert_eq!(snap.authenticate_gateway_key("pg-test").unwrap().name, "team-alpha");
+        assert_eq!(
+            snap.authenticate_gateway_key("pg-test").unwrap().name,
+            "team-alpha"
+        );
         assert!(snap.authenticate_gateway_key("wrong").is_none());
     }
 

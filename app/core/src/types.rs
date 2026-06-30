@@ -133,7 +133,10 @@ mod tests {
     #[test]
     fn capability_family_serde_roundtrip_and_rejection() {
         let f: CapabilityFamily = serde_json::from_str("\"generation.stateless\"").unwrap();
-        assert_eq!(serde_json::to_string(&f).unwrap(), "\"generation.stateless\"");
+        assert_eq!(
+            serde_json::to_string(&f).unwrap(),
+            "\"generation.stateless\""
+        );
         assert!(serde_json::from_str::<CapabilityFamily>("\"embeddings\"").is_err());
     }
 }

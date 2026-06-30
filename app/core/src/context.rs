@@ -35,7 +35,11 @@ impl TraceId {
     /// counter; the seed disambiguates across processes.
     pub fn generate() -> Self {
         let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
-        Self(format!("pg-{:08x}-{:08x}", process_seed() & 0xffff_ffff, seq))
+        Self(format!(
+            "pg-{:08x}-{:08x}",
+            process_seed() & 0xffff_ffff,
+            seq
+        ))
     }
 
     /// Reuse a non-empty inbound trace id, otherwise generate a new one.
@@ -110,7 +114,9 @@ mod tests {
     #[test]
     fn from_header_generates_when_absent_or_blank() {
         assert!(TraceId::from_header(None).as_str().starts_with("pg-"));
-        assert!(TraceId::from_header(Some("   ")).as_str().starts_with("pg-"));
+        assert!(TraceId::from_header(Some("   "))
+            .as_str()
+            .starts_with("pg-"));
     }
 
     #[test]

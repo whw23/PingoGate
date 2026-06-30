@@ -39,7 +39,8 @@ impl SecretResolver for EnvSecretResolver {
         match scheme {
             "env" => {
                 let var = rest.trim();
-                let value = std::env::var(var).map_err(|_| SecretError::MissingEnv(var.to_string()))?;
+                let value =
+                    std::env::var(var).map_err(|_| SecretError::MissingEnv(var.to_string()))?;
                 if value.is_empty() {
                     return Err(SecretError::EmptyValue(var.to_string()));
                 }
@@ -65,7 +66,9 @@ mod tests {
     #[test]
     fn missing_env_var_errors_without_leaking_value() {
         let r = EnvSecretResolver;
-        let err = r.resolve("env:PINGO_TEST_DEFINITELY_UNSET_VAR").unwrap_err();
+        let err = r
+            .resolve("env:PINGO_TEST_DEFINITELY_UNSET_VAR")
+            .unwrap_err();
         assert!(matches!(err, SecretError::MissingEnv(_)));
         assert!(err.to_string().contains("PINGO_TEST_DEFINITELY_UNSET_VAR"));
     }
@@ -77,7 +80,10 @@ mod tests {
             r.resolve("vault:foo").unwrap_err(),
             SecretError::UnsupportedScheme(_)
         ));
-        assert!(matches!(r.resolve("noscheme").unwrap_err(), SecretError::UnsupportedScheme(_)));
+        assert!(matches!(
+            r.resolve("noscheme").unwrap_err(),
+            SecretError::UnsupportedScheme(_)
+        ));
     }
 
     #[test]

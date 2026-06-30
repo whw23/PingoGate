@@ -28,10 +28,15 @@ pingo-pipeline = { path = "pipeline" }
 pingo-listener = { path = "listener" }
 pingo-admin = { path = "admin" }
 
+# Pingora hot path + Admin ServeHttp (constitution III). rustls backend avoids
+# the openssl/boringssl system toolchain (pure-Rust TLS, aligns with Safe Rust).
+pingora = { version = "0.8", default-features = false, features = ["proxy", "rustls"] }
+
 # External (locked stack per constitution III; non-locked additions justified in PRs).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+http = "1"
 arc-swap = "1"
 thiserror = "2"
 async-trait = "0.1"

@@ -88,7 +88,11 @@ mod tests {
 
     #[test]
     fn all_adapters_declare_only_generation_stateless() {
-        for kind in [ProviderKind::OpenaiCompatible, ProviderKind::Anthropic, ProviderKind::Gemini] {
+        for kind in [
+            ProviderKind::OpenaiCompatible,
+            ProviderKind::Anthropic,
+            ProviderKind::Gemini,
+        ] {
             let a = adapter_for(kind);
             assert!(a.supports(CapabilityFamily::GenerationStateless));
             assert_eq!(a.capability_families(), STATELESS);

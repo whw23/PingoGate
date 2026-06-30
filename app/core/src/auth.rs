@@ -27,13 +27,22 @@ pub struct Principal {
 
 impl Principal {
     pub fn gateway_key(id: impl Into<String>) -> Self {
-        Self { id: id.into(), kind: PrincipalKind::GatewayKey }
+        Self {
+            id: id.into(),
+            kind: PrincipalKind::GatewayKey,
+        }
     }
     pub fn admin(id: impl Into<String>) -> Self {
-        Self { id: id.into(), kind: PrincipalKind::Admin }
+        Self {
+            id: id.into(),
+            kind: PrincipalKind::Admin,
+        }
     }
     pub fn system() -> Self {
-        Self { id: "system".to_string(), kind: PrincipalKind::System }
+        Self {
+            id: "system".to_string(),
+            kind: PrincipalKind::System,
+        }
     }
 }
 
@@ -74,7 +83,10 @@ pub struct Resource {
 
 impl Resource {
     pub fn new(kind: ResourceKind, name: impl Into<String>) -> Self {
-        Self { kind, name: name.into() }
+        Self {
+            kind,
+            name: name.into(),
+        }
     }
     pub fn route(name: impl Into<String>) -> Self {
         Self::new(ResourceKind::Route, name)
@@ -115,7 +127,9 @@ impl AuthContext {
         if allowed {
             Ok(())
         } else {
-            Err(AppError::Unauthorized { action: action.as_str().to_string() })
+            Err(AppError::Unauthorized {
+                action: action.as_str().to_string(),
+            })
         }
     }
 }
@@ -127,7 +141,9 @@ mod tests {
     #[test]
     fn gateway_key_may_proxy_but_not_administer() {
         let ctx = AuthContext::new(Principal::gateway_key("team-alpha"));
-        assert!(ctx.authorize(Action::Proxy, &Resource::route("gpt-4o")).is_ok());
+        assert!(ctx
+            .authorize(Action::Proxy, &Resource::route("gpt-4o"))
+            .is_ok());
         assert!(ctx
             .authorize(Action::AdminReload, &Resource::admin_endpoint("/reload"))
             .is_err());
@@ -139,7 +155,9 @@ mod tests {
         assert!(ctx
             .authorize(Action::AdminReload, &Resource::admin_endpoint("/reload"))
             .is_ok());
-        assert!(ctx.authorize(Action::Proxy, &Resource::route("gpt-4o")).is_err());
+        assert!(ctx
+            .authorize(Action::Proxy, &Resource::route("gpt-4o"))
+            .is_err());
     }
 
     #[test]

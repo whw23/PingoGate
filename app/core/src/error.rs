@@ -109,11 +109,17 @@ mod tests {
     fn application_and_infra_layers_classified() {
         assert_eq!(AppError::AuthFailed.layer(), ErrorLayer::Application);
         assert_eq!(
-            AppError::UpstreamTimeout { provider: "p".into() }.layer(),
+            AppError::UpstreamTimeout {
+                provider: "p".into()
+            }
+            .layer(),
             ErrorLayer::Infrastructure
         );
         assert_eq!(
-            AppError::Validation { message: "m".into() }.layer(),
+            AppError::Validation {
+                message: "m".into()
+            }
+            .layer(),
             ErrorLayer::Validation
         );
     }
@@ -122,16 +128,25 @@ mod tests {
     fn http_status_only_resolved_at_boundary() {
         assert_eq!(AppError::AuthFailed.http_status(), 401);
         assert_eq!(
-            AppError::Unauthorized { action: "reload".into() }.http_status(),
+            AppError::Unauthorized {
+                action: "reload".into()
+            }
+            .http_status(),
             403
         );
         assert_eq!(AppError::NoRoute { alias: "x".into() }.http_status(), 404);
         assert_eq!(
-            AppError::UpstreamUnavailable { provider: "p".into() }.http_status(),
+            AppError::UpstreamUnavailable {
+                provider: "p".into()
+            }
+            .http_status(),
             502
         );
         assert_eq!(
-            AppError::UpstreamTimeout { provider: "p".into() }.http_status(),
+            AppError::UpstreamTimeout {
+                provider: "p".into()
+            }
+            .http_status(),
             504
         );
     }

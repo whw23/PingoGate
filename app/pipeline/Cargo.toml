@@ -13,5 +13,7 @@ workspace = true
 pingo-core = { workspace = true }
 pingo-config = { workspace = true }
 pingo-provider = { workspace = true }
+pingora = { workspace = true }
+async-trait = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

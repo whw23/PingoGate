@@ -5,3 +5,7 @@
 //! `Principal` / `AuthContext` / `authorize(action, resource)` boundary —
 //! including bootstrap credentials (constitution XX). Endpoint handlers and
 //! the reload orchestrator are added in User Story 2/3.
+
+pub mod app;
+
+pub use app::AdminApp;

@@ -1,0 +1,5 @@
+# Tests may use unwrap/expect freely. Constitution XX forbids unwrap/expect on
+# *external input* in production code (enforced by the workspace clippy lints);
+# test assertions are not external input, so they are exempt here.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

@@ -20,7 +20,10 @@ pub struct ValidationError {
 
 impl ValidationError {
     fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { path: path.into(), message: message.into() }
+        Self {
+            path: path.into(),
+            message: message.into(),
+        }
     }
 }
 
@@ -44,9 +47,21 @@ pub enum ConfigError {
 pub fn validate_semantics(cfg: &GatewayConfig) -> Result<(), ConfigError> {
     let mut errs = Vec::new();
 
-    check_unique(cfg.gateway_keys.iter().map(|k| k.name.as_str()), "gateway_keys", &mut errs);
-    check_unique(cfg.providers.iter().map(|p| p.name.as_str()), "providers", &mut errs);
-    check_unique(cfg.routes.iter().map(|r| r.alias.as_str()), "routes", &mut errs);
+    check_unique(
+        cfg.gateway_keys.iter().map(|k| k.name.as_str()),
+        "gateway_keys",
+        &mut errs,
+    );
+    check_unique(
+        cfg.providers.iter().map(|p| p.name.as_str()),
+        "providers",
+        &mut errs,
+    );
+    check_unique(
+        cfg.routes.iter().map(|r| r.alias.as_str()),
+        "routes",
+        &mut errs,
+    );
 
     for (i, p) in cfg.providers.iter().enumerate() {
         if !auth_compatible(p.kind, p.auth.method) {
@@ -144,7 +159,9 @@ listeners:
             "{BASE_LISTENERS}providers:\n  - name: \"a\"\n    kind: \"anthropic\"\n    base_url: \"https://x\"\n    auth: {{ method: \"api_key_header\", key_ref: \"env:K\" }}\n    capability_families: [\"generation.stateless\"]\n"
         );
         let err = validate_semantics(&cfg(&yaml)).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(v) if v.iter().any(|e| e.path.ends_with("anthropic_version"))));
+        assert!(
+            matches!(err, ConfigError::Invalid(v) if v.iter().any(|e| e.path.ends_with("anthropic_version")))
+        );
     }
 
     #[test]
