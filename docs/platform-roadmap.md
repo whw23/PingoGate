@@ -19,9 +19,10 @@ PingoGate 的目标是**多用户、BYOK 优先的 LLM 流量治理 SaaS 平台*
 
 PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构（详见宪法「双语言内核架构」总纲）：
 
-- **Rust 内核**（`core-rs/`，`pingogate-core` 二进制）：请求处理核心引擎 + 安全核心。Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 透传 / SSE）+ 路由引擎 + 转换引擎 + KeyVault（密钥加解密）+ 快照引擎。性能 / 正确性敏感、稳定少变。
-- **Go 非内核**（`ctrl-go/`，`pingogate-ctrl` 二进制）：业务面 + 平台治理。控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）+ OAuth / 会话 + 计费 / 用量 / 审计 + 控制台 BFF + DB。迭代频繁、生态依赖。
-- **通信**：Go 经 gRPC 把配置 / 密钥 / 虚拟 key 作为快照推给 Rust 内核；Rust KeyVault 解密后存内存快照，热路径零 DB 零解密。跨语言类型经 `proto/` codegen 同步。
+- **Rust 内核**（`core-rs/`，`pingogate-core` 二进制）：**无状态**请求处理核心引擎 + 安全核心 + 用量采集。Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 透传 / SSE）+ 路由引擎 + 转换引擎（无状态 body 改写 / 协议桥，不含 materialize）+ KeyVault（密钥加解密）+ 快照引擎（内存）+ 用量采集（内存通道，推 Go 落库）。**零 DB、零持久状态**。性能 / 正确性敏感、稳定少变。
+- **Go 非内核**（`ctrl-go/`，`pingogate-ctrl` 二进制）：**所有状态** + 业务面 + 平台治理。控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）+ OAuth / 会话 + **上下文桥（ConversationTimeline 存储 + ContextMaterializer）** + 用量聚合 / 落库 / 计费 + 审计 + 控制台 BFF + DB。迭代频繁、生态依赖。
+- **通信**：Go 经 gRPC 把配置 / 密钥 / 虚拟 key 作为快照推给 Rust 内核；Rust KeyVault 解密后存内存快照，热路径零 DB 零解密。Rust 用量采集到内存后批量推 Go 落库。**带上下文请求**（previous_response_id / previous_interaction_id）由 Go materialize 后推 Rust 透传；**无上下文请求**直入 Rust。跨语言类型经 `proto/` codegen 同步。
+- **分界原则**：Rust 内核 = 无状态计算（透传 / 路由 / 无状态转换 / 安全 / 采集，零 DB）；Go 非内核 = 所有状态（配置 / 用户 / 上下文 timeline / 用量落库 / 计费，管 DB）。
 - **部署**：双二进制，可单 Docker 镜像。单仓库（`proto/` / `core-rs/` / `ctrl-go/` / `console/` / `deploy/` / `docs/` / `.claude/`），proto 为 Rust / Go 共享根。
 - **双运行模式**：Rust 内核同一二进制支持两种形态：
   - **单机模式（standalone）**：内核单独跑，从 `pingogate-core.yaml` 加载路由 / 上游 / 静态网关 key，provider key 用密钥引用（`env:VAR`，不加密），无 Go、无 DB。轻量 LLM 网关（蓝图 3.1 单二进制优先）。KeyVault 不启用。
@@ -47,6 +48,10 @@ L2 虚拟 key：签发 / scoped / 可撤销（≈ SAS token）
   ↓ 有凭据才能调数据面
 L3 数据面骨架：Pingora + 单协议透传（虚拟key -> provider key -> 上游）
   ↓ 能跑流量才有用量
+L3.5 上下文桥：ConversationTimeline + ContextMaterializer（Go）
+  带 previous_response_id / previous_interaction_id 的有状态请求 -> Go 查 timeline + materialize -> Rust 透传
+  依赖：L3 数据面 + provider schema（marketplace 驱动 materialize 规则）
+  ↓ 有上下文桥才能桥接有状态协议到无状态上游
 L4 多租户：Tenant -> Project + RBAC + 组织 key 共享
   ↓ 有组织模型才有治理
 L5 可观测 + 用量：UsageSink 流式计量 + 指标
@@ -138,11 +143,11 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 
 **职责**：让流量可见、可计量，为计费铺路。**token 计量在 Rust 内核，查询/计费在 Go 非内核**（宪法 XIX）。
 
-- **Rust 内核用量计量引擎**：热路径采集 token -> 内存通道 -> 后台批量 flush -> 落用量表（可插拔 sink：SQL / 未来 Redis / Kafka）。带 tokenizer（tiktoken-rs）做本地估算。
+- **Rust 内核用量采集**：热路径采集 token -> 内存通道 -> 批量推 Go（Rust 零 DB）。带 tokenizer（tiktoken-rs）做本地估算。
 - **三种用量来源**：(1) 响应带 usage--解析 SSE 末尾 usage（注意 OpenAI 流式需 `include_usage: true`，可能由转换引擎改写请求注入）；(2) 响应不带 usage--本地 tokenizer 估算 input/output；(3) 失败响应--input 仍计（请求已发上游），output 按已吐部分计（0 或部分），流中断做终态对账。
 - **增量采集 + 终态对账**：每收一 SSE chunk 增计 output；流正常结束或中断（超时 / 客户端断开 / 上游错）都做终态对账落库，失败不丢 input。
 - Prometheus 指标（按 provider + 能力族 + principal 打标签，宪法 XIX）；tracing 结构化日志 + 贯穿管线 trace id；密钥脱敏（宪法 XX）。
-- **Go 非内核**：用量查询 / 计费 / 配额规则（人速业务，RBAC），读 Rust 写入的用量表。
+- **Go 非内核**：收 Rust 推来的用量事件聚合 / 落库（可插拔 sink：SQL / 未来 Redis / Kafka）；用量查询 / 计费 / 配额规则（人速业务，RBAC）。
 
 **预留位置**：partition 分片（L6）；计费消费（L6）。
 
