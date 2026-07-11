@@ -129,15 +129,15 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 
 **证伪目标**：多租户隔离成立——组织成员可用组织 key 但不可见明文（非创建者），跨组织隔离，RBAC 边界生效。
 
-### L5 — 可观测 + 用量：流式计量与指标
+### L5 - 可观测 + 用量：流式计量与指标
 
-**职责**：让流量可见、可计量，为计费铺路。
+**职责**：让流量可见、可计量，为计费铺路。**token 计量在 Rust 内核，查询/计费在 Go 非内核**（宪法 XIX）。
 
-- `UsageSink` trait：热路径写内存通道 → 后台批量 flush → 可插拔后端（file / SQL / 未来 Redis / Kafka）
-- token 流式计量：跟随 SSE 流增量累计，处理中断部分计量，区分 input/output/reasoning/cache token，终态对账（IoT 没有的 LLM 独有挑战）
-- Prometheus 指标（按 provider + 能力族 + principal 打标签，宪法 XIX）
-- tracing 结构化日志 + 贯穿管线 trace id
-- 密钥脱敏（宪法 XX）
+- **Rust 内核用量计量引擎**：热路径采集 token -> 内存通道 -> 后台批量 flush -> 落用量表（可插拔 sink：SQL / 未来 Redis / Kafka）。带 tokenizer（tiktoken-rs）做本地估算。
+- **三种用量来源**：(1) 响应带 usage--解析 SSE 末尾 usage（注意 OpenAI 流式需 `include_usage: true`，可能由转换引擎改写请求注入）；(2) 响应不带 usage--本地 tokenizer 估算 input/output；(3) 失败响应--input 仍计（请求已发上游），output 按已吐部分计（0 或部分），流中断做终态对账。
+- **增量采集 + 终态对账**：每收一 SSE chunk 增计 output；流正常结束或中断（超时 / 客户端断开 / 上游错）都做终态对账落库，失败不丢 input。
+- Prometheus 指标（按 provider + 能力族 + principal 打标签，宪法 XIX）；tracing 结构化日志 + 贯穿管线 trace id；密钥脱敏（宪法 XX）。
+- **Go 非内核**：用量查询 / 计费 / 配额规则（人速业务，RBAC），读 Rust 写入的用量表。
 
 **预留位置**：partition 分片（L6）；计费消费（L6）。
 

@@ -8,12 +8,12 @@
 
 PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 
-- **Rust 内核**（`pingogate-core` 二进制）：请求处理核心引擎 + 安全核心。性能 / 正确性敏感、稳定少变、不可替代。包括：Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 上游认证注入 / 响应转换 / SSE 零拷贝透传 / 错误镜像）、路由引擎（别名 / 权重 / fallback / 健康检查）、转换引擎（请求 / 响应 / body / stream 转换，未来协议桥）、KeyVault（密钥加解密，安全核心）、快照引擎（RuntimeSnapshot + ArcSwap，热路径零 DB）。
-- **Go 非内核**（`pingogate-ctrl` 二进制）：业务面 + 平台治理。迭代频繁、生态依赖。包括：控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）、OAuth / 会话、计费 / 配额 / 限流配置、用量聚合 / 审计、控制台后端 BFF、管理面（健康 / 就绪 / reload 编排）、DB。
-- **通信**：Go 非内核经 gRPC 把「配置 / 密钥 / 虚拟 key」作为快照推给 Rust 内核；Rust 内核 KeyVault 解密后存内存快照，热路径零 DB 零解密。跨语言类型经 protobuf codegen 同步。
+- **Rust 内核**（`pingogate-core` 二进制）：请求处理核心引擎 + 安全核心 + 用量计量引擎。性能 / 正确性敏感、稳定少变、不可替代。包括：Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 上游认证注入 / 响应转换 / SSE 零拷贝透传 / 错误镜像）、路由引擎（别名 / 权重 / fallback / 健康检查）、转换引擎（请求 / 响应 / body / stream 转换，未来协议桥）、KeyVault（密钥加解密，安全核心）、快照引擎（RuntimeSnapshot + ArcSwap，热路径零 DB）、**用量计量引擎（token 采集 / 聚合 / 落库；带 tokenizer 做本地估算；增量采集 + 终态对账；后台异步落 DB，热路径零 DB 读）**。
+- **Go 非内核**（`pingogate-ctrl` 二进制）：业务面 + 平台治理。迭代频繁、生态依赖。包括：控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）、OAuth / 会话、**用量查询 / 计费 / 配额 / 限流规则**、审计、控制台后端 BFF、管理面（健康 / 就绪 / reload 编排）、DB。
+- **通信**：Go 非内核经 gRPC 把「配置 / 密钥 / 虚拟 key / 计费规则」作为快照推给 Rust 内核；Rust 内核 KeyVault 解密后存内存快照，热路径零 DB 零解密。Rust 内核用量计量后台异步写用量表到 DB；Go 非内核读用量表做查询 / 计费。跨语言类型经 protobuf codegen 同步。
 - **部署**：双二进制，可打包进单个 Docker 镜像。
 
-**分界原则**：请求从进到出的整条处理链路（含路由 / 转换）+ 安全核心 = Rust；围绕这条链路的配置 / 治理 / 业务 = Go。
+**分界原则**：请求从进到出的整条处理链路（含路由 / 转换）+ 安全核心 + **请求处理的副产品（用量采集 / 聚合 / 健康检查 / 配额计数）** = Rust；围绕这条链路的配置 / 治理 / 业务（用量查询 / 计费 / 规则配置）= Go。
 
 ## 适用层图例
 
@@ -89,9 +89,9 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 三类状态严格分离：
 - **Capability Repository**（系统能做什么）：provider 能力声明、模型元数据、转换 / 策略模板、未来签名能力包。**不保存**用户密钥、租户策略、用量、计费、会话状态。
 - **Runtime Config / 快照**（实例如何运行，L3 起）：listener、domain、certificate、enabled providers、upstream channels、model routing、transform rules、policy、metrics、reload。由 Go 非内核管理 DB 源，经 gRPC 推给 Rust 内核构建不可变 RuntimeSnapshot（ArcSwap 原子切换）。来源 YAML / TOML / JSON / env / K8s ConfigMap / DB 发布版本。
-- **Control Plane State**（谁在使用、用了多少）：users、tenants、projects、API keys、virtual keys、provider keys（密文）、quota、budgets、usage、billing、audit。由 Go 非内核管理，存 SQLite / Postgres（sqlx 可切换）。（conversation state 属远期协议桥，L6 之后，非近期。）
+- **Control Plane State**（谁在使用、用了多少）：users、tenants、projects、API keys、virtual keys、provider keys（密文）、quota、budgets、usage、billing、audit。由 Go 非内核管理写入，存 SQLite / Postgres（sqlx 可切换）。**用量表（usage）例外**：由 Rust 内核用量计量引擎后台异步写入（热路径采集 + 终态对账 + 批量落库），Go 非内核只读用于查询 / 计费。（conversation state 属远期协议桥，L6 之后，非近期。）
 
-重载不触控制面状态；不可变 `RuntimeSnapshot` + `ArcSwap` 原子切换（Rust 内核，L3 起）。L0-L2 控制面 CRUD 直连 DB + 失效相关缓存 + 推新快照给 Rust 内核。
+重载不触控制面状态；不可变 `RuntimeSnapshot` + `ArcSwap` 原子切换（Rust 内核，L3 起）。**热路径零 DB 读**（只读内存快照）；后台异步写（用量落库、reload 编排）允许访问 DB，与热路径隔离。L0-L2 控制面 CRUD 直连 DB + 失效相关缓存 + 推新快照给 Rust 内核。
 
 ## XI. Provider 抽象（能力族）【L3+，Rust 内核】
 - adapter 声明支持的能力族（而非只注册 endpoint handler）；暴露 namespace；不支持的能力族显式拒绝（返回明确「不支持」错误，不静默 / 畸形透传）。
@@ -127,10 +127,10 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 ## XVIII. Subagent 监控【横切】
 - 如用 subagent 则监控其存活。
 
-## XIX. 可观测性【L0+ 管理（Go）+ L3+/L5 热路径（Rust）】
+## XIX. 可观测性【L0+ 管理（Go）+ L3+/L5 热路径与计量（Rust）】
 - **L0+ 管理面（Go）**：slog 结构化日志，管理操作审计（who/what/when），密钥脱敏。
 - **L3+ 热路径（Rust）**：tracing 带贯穿管线的 trace / 请求 ID；Prometheus 指标按 provider + 能力族（必需）打标签，MAY 按 principal id（非明文密钥）归因。
-- **L5 用量（Go 聚合 + Rust 上报）**：必需观测信号--请求量、状态码、延迟、上游延迟、retries、fallback、token 计数（input / output / reasoning / cache）。Rust 内核热路径上报事件，Go 非内核聚合落库。
+- **L5 用量计量（Rust 采集 + Go 查询）**：必需观测信号--请求量、状态码、延迟、上游延迟、retries、fallback、token 计数（input / output / reasoning / cache）。**token 采集 / 聚合 / 落库在 Rust 内核**（流在 Rust；带 tokenizer 本地估算；增量采集 + 终态对账，失败请求也计 input、output 按已吐部分计；后台异步落用量表，热路径零 DB 读）；**用量查询 / 计费 / 配额规则在 Go 非内核**（人速业务，RBAC）。
 - 密钥 / token 经统一脱敏层后才输出（横切，所有层，双语言）。
 
 ## XX. 安全 / 保密 / 隐私【横切】
