@@ -1,18 +1,29 @@
 # PingoGate
 
-基于 [Pingora](https://github.com/cloudflare/pingora) 的高性能 LLM 网关，目标是**多用户、BYOK 优先**的 AI 流量治理平台。
+多用户、BYOK 优先的 LLM 流量治理 SaaS 平台。用户自带 Provider Key 与模型，完全私有，管理员不可见明文 Key。
+
+## 架构
+
+双语言内核架构：
+
+- **Rust 内核**（`core-rs/`，`pingogate-core`）：请求处理核心引擎 + 安全核心。Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 透传 / SSE）+ 路由引擎 + 转换引擎 + KeyVault（密钥加解密）+ 快照引擎。
+- **Go 非内核**（`ctrl-go/`，`pingogate-ctrl`）：业务面 + 平台治理。控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）+ OAuth / 会话 / 计费 / 用量 / 审计 + 控制台 BFF + DB。
+- **通信**：Go 经 gRPC 把快照推给 Rust 内核，热路径零 DB 零解密。
 
 ## 当前状态
 
-项目正在以「用户优先 / BYOK 为基座」重写。用户自带 Provider Key 与模型，完全私有，管理员不可见明文 Key；路由策略后置。
+项目以「用户优先 / BYOK 为基座」重写。旧实现（路由优先单管理员代理）已归档至 `redesign` 分支，仅作历史参考。
 
-- **宪法**：[`.claude/rules/constitution.md`](.claude/rules/constitution.md)（项目宪法 v1.6.0，I~XXII 原则）
+- **宪法**：[`.claude/rules/constitution.md`](.claude/rules/constitution.md)（I~XXII 原则 + 双语言内核架构总纲）
 - **蓝图**：[`docs/blueprint/`](docs/blueprint/)（完整产品愿景，BYOK 详见第 16A 节）
-- 旧实现（路由优先的单管理员代理范式）已归档至 `redesign` 分支，仅作历史参考。
+- **路线图**：[`docs/platform-roadmap.md`](docs/platform-roadmap.md)（SaaS 平台 L0-L6 能力层分解）
 
 ## 技术栈
 
-Rust + Pingora（热路径）+ tokio + serde + tracing + Prometheus/OpenTelemetry。源码位于 `app/` Cargo workspace。
+- Rust 内核：Pingora + tokio + serde + tracing + Prometheus/OTel（Safe Rust）。
+- Go 非内核：net/http + chi + sqlx（SQLite/PG 可切）+ slog + prometheus/client_go。
+- 跨语言：gRPC + `proto/` codegen。
+- 前端：TypeScript/React，build 后嵌入 Go（L6 实现）。
 
 ---
 

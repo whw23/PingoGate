@@ -15,6 +15,19 @@ PingoGate 的目标是**多用户、BYOK 优先的 LLM 流量治理 SaaS 平台*
 - **SaaS 平台 ≠ 一个 spec 装下所有**：成熟 SaaS 平台分阶段长起来，每阶段是独立可交付的闭环。平台是愿景，分解是路径。
 - **层间只预留位置，不预留框架**（宪法 II YAGNI）：每层只实现自己，对上层留接口位置而非实现框架。
 
+### 双语言内核架构
+
+PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构（详见宪法「双语言内核架构」总纲）：
+
+- **Rust 内核**（`core-rs/`，`pingogate-core` 二进制）：请求处理核心引擎 + 安全核心。Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 透传 / SSE）+ 路由引擎 + 转换引擎 + KeyVault（密钥加解密）+ 快照引擎。性能 / 正确性敏感、稳定少变。
+- **Go 非内核**（`ctrl-go/`，`pingogate-ctrl` 二进制）：业务面 + 平台治理。控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）+ OAuth / 会话 + 计费 / 用量 / 审计 + 控制台 BFF + DB。迭代频繁、生态依赖。
+- **通信**：Go 经 gRPC 把配置 / 密钥 / 虚拟 key 作为快照推给 Rust 内核；Rust KeyVault 解密后存内存快照，热路径零 DB 零解密。跨语言类型经 `proto/` codegen 同步。
+- **部署**：双二进制，可单 Docker 镜像。
+
+**分界原则**：请求从进到出的整条处理链路（含路由 / 转换）+ 安全核心 = Rust；围绕这条链路的配置 / 治理 / 业务 = Go。
+
+各能力层的主语言：L0-L2 控制面 = Go（L1 的 KeyVault 加解密在 Rust 内核，Go 经 gRPC 调）；L3 数据面 = Rust；L4-L6 治理 / 用量 / 计费 = Go（用量事件由 Rust 热路径上报，Go 聚合）。
+
 ## 2. 能力层分解
 
 平台按依赖序拆为 L0-L6 七层。每层是一个独立 sub-spec（各自 spec → plan → 实现 → 验证）。**每层独立可交付、可验证、可用**。
@@ -135,7 +148,7 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 **职责**：把网关变成完整 SaaS 平台。
 
 - 计费配额：预算 / 配额 / 限流 / 价格 / 成本 / 用量归因（蓝图 15）
-- 嵌入式控制台：Vite + React + React Router + React Query + shadcn/ui + Tailwind，build 后 rust-embed 嵌入，axum 托管（宪法 III/IV）；管理员视图 + 用户视图分离（蓝图 18）
+- 嵌入式控制台：Vite + React + React Router + React Query + shadcn/ui + Tailwind，build 后嵌入 Go 非内核（embed.FS）由 chi 托管（宪法 III/IV）；管理员视图 + 用户视图分离（蓝图 18）
 - 多协议：Anthropic Messages / Gemini generateContent 透传 + SSE（蓝图 8）
 - 规模化：多节点 + Redis（协调锁 / 限流 / 共享配额）+ Kafka（用量事件多消费者 / 回放），按触发条件引入（见 §5）
 - 协议桥 / 上下文虚拟化（蓝图 10/11，更远期）
@@ -146,15 +159,16 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 
 | 约束 | 来源 | 说明 |
 |---|---|---|
-| 热路径必须 Pingora | 宪法 III | L3 起触发；L0-L2 无热路径 |
-| 管理面可用 axum | 宪法 III | L0 起；OAuth / 会话 / REST CRUD |
-| 控制面存储可用 sea-orm | 宪法 III | L1 起；SQLite/PG 可切；热路径零 DB |
+| 内核 Rust + 非内核 Go | 宪法总纲 | 双二进制；请求处理链路+安全核心=Rust，业务治理=Go |
+| 热路径必须 Pingora | 宪法 III | L3 起触发（Rust 内核）；L0-L2 无热路径 |
+| Go 非内核用 net/http+chi+sqlx | 宪法 III | L0 起控制面；SQLite/PG 可切；热路径零 DB |
+| 跨语言 gRPC + proto | 宪法 III/IV | Go->Rust 快照推送；类型经 proto codegen 同步 |
 | 状态三分 | 宪法 X | Capability Repo / Runtime Config / Control Plane State 分离 |
-| 不可变快照 + ArcSwap | 宪法 XII | L3 起；热路径零 DB，仅读内存 |
-| 密钥脱敏 + 加密 | 宪法 XX | 全程；KeyVault 唯一解密入口 |
+| 不可变快照 + ArcSwap | 宪法 XII | L3 起（Rust 内核）；热路径零 DB，仅读内存 |
+| 密钥脱敏 + 加密 | 宪法 XX | 全程；KeyVault（Rust 内核）唯一解密入口，Go 只持密文 |
 | authorize 边界 | 宪法 XX | 全程；无全局 token 等值 |
 | YAGNI | 宪法 II | 层间只预留位置不预留框架 |
-| TDD | 宪法 XIII | 每层契约 / 集成 / 单元测试先行 |
+| TDD | 宪法 XIII | 每层契约 / 集成 / 单元测试先行；gRPC 接口双侧契约测试 |
 
 ## 5. 中间件引入触发条件（不预设时间表）
 
