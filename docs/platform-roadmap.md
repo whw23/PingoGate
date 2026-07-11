@@ -315,6 +315,40 @@ Rust 零 DB、不带 tokenizer；Go 管估算/落库/计费/配额。
 - **文件 / 媒体 / 对象存储**（蓝图 13）：PingoGateFileRef，跨 provider 文件 materialization。被 Responses tools / multimodal / batch 依赖。file.media 能力族。
 - **Batch Jobs**（蓝图 14）：OpenAI Batches / Gemini Batch / Anthropic Message Batches，job model。batch 能力族。
 
+## 3E. 网关基础设施（执行 Rust / 配置 Go 分界）
+
+蓝图 17 的网关基础设施按「执行在 Rust 热路径 / 配置在 Go」分界（与鉴权 / 配额同模式）：
+
+| 类型 | 内容 | 归属 |
+|---|---|---|
+| **数据面基础设施（执行）** | TLS 终止 / HTTP2 / SNI / 上游 TLS 校验 / 重试 / fallback / 熔断 / 健康检查 / 请求大小限制 | Rust 内核（Pingora 热路径，宪法 III） |
+| **管理面基础设施（配置）** | 证书文件管理 / ACME 自动化 / IP allow-deny 规则 / mTLS CA 与策略 / CORS 规则 | Go 非内核（CRUD + 推快照） |
+
+- TLS 终止 / HTTP2 / SNI：Pingora 自带，Rust 内核。
+- 上游 TLS 校验：Rust（upstream_peer，001 已实现）。
+- 重试 / fallback / 熔断 / 健康检查：Rust 路由引擎（热路径决策，内存）。
+- 证书 / ACME / IP 规则 / CORS / mTLS 策略：Go 配置，Rust 执行（热路径 filter 读快照）。
+- L3 起逐步覆盖；ACME / mTLS / region-aware 路由等后置。
+
+## 3F. 非核心 Provider 接口后置
+
+蓝图 8 列了每个 provider 的完整 API 家族（OpenAI Responses/Conversations/Realtime/Files/Embeddings/Batches/Fine-tuning/Evals/Assistants...；Gemini Interactions/Live/Batch/Files...；Anthropic Messages/Batches/Files/MCP...）。本路线图核心覆盖 5 个主接口（OpenAI Chat Completions + Responses / Gemini generateContent + Interactions / Anthropic Messages，见 `docs/research/provider-schemas/`）。**其余非核心接口后置**，随能力族（§3D / 宪法 XI）逐步支持，不预先编排。
+
+## 3G. 已确认决策日志（蓝图 23 迁移）
+
+| 决策 | 结论 |
+|---|---|
+| 配置格式 | 用户主配置 + proxy profile 用 YAML；marketplace catalog / 锁文件 / schema 用 JSON；TOML 不作核心 profile 格式 |
+| 脚本引擎 | 放弃 Rhai；主路径用声明式 TransformPlan + Rust 编译计划；复杂第三方逻辑未来优先签名 WASM |
+| 仓库与分发 | 单仓库（`proto/` / `core-rs/` / `ctrl-go/` / `console/` / `deploy/`）；GitHub 承担源码协作 + release 分发 + proxy/provider marketplace |
+| 控制台 | 嵌入式 TypeScript 控制台（React + Vite + React Router + React Query + shadcn/ui + Tailwind），build 后 embed.FS 嵌入 **Go 非内核**，chi 托管（非 Rust）。管理员视图 + 用户视图分离 |
+| 嵌入式控制台时机 | L6 实现；L0-L5 仅机器可读 API + 身份边界 |
+| 双语言架构 | 内核 Rust + 非内核 Go（对蓝图 3.2「纯 Rust」的有意偏离，理由见宪法总纲） |
+| Responses/Interactions 状态模拟 | 跨协议转化时必须存 ConversationTimeline（见宪法 XX）；同态透传不存完整内容 |
+| 跨协议转换 / 上下文桥 / realtime / batch / files | 倾向延后但架构预留位置（§3B/§3D） |
+
+LiteLLM（蓝图 19）/ New API（蓝图 20）对齐清单作为产品覆盖度对标参考，非自研需求清单；New API 是 Go 项目可随时参照。
+
 ## 4. 横切约束（每层都适用）
 
 | 约束 | 来源 | 说明 |

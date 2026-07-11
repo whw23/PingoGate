@@ -19,6 +19,8 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 
 **分界原则**：**Rust 内核 = 无状态计算**（请求处理链路：透传 / 路由 / 无状态转换 / 安全 / 采集；零 DB 零持久状态）；**Go 非内核 = 所有状态**（配置 / 用户 / 上下文 ConversationTimeline / 用量落库 / 计费 / 审计；管 DB）。例外：单机模式（见下）Rust 从文件加载快照，仍无 DB。
 
+**双语言决策理由（对蓝图 3.2「后端只用 Rust」的有意偏离）**：蓝图 3.2 原定后端纯 Rust，但经评估（详见决策记录），采用内核 Rust + 非内核 Go 更优：Rust 守「绝对不能错且性能敏感」的请求处理核心 + 安全核心（Pingora 热路径 / KeyVault 加解密 / 转换引擎，蓝图 3.5/10/11 本就把请求管线视为核心差异点），Go 拿「迭代频繁且生态依赖」的业务面 + 所有状态（SaaS 治理 / 计费 / 上下文 timeline / 控制台 BFF）。对标 New API/LiteLLM 级性能（Go 数据面够），IoT Hub 工业实践印证 GC 语言扛高吞吐中心化网关（Magistrala 纯 Go 生产级）。vibecoding 抹平语言熟练度差异。单二进制非硬约束，接受双进程。蓝图 3.2 的「纯 Rust」诉求由「内核 Rust」承担（核心仍 Rust），非内核 Go 不违背蓝图精神（蓝图 3.2 意在「敏感操作留 Rust」，已在内核满足）。
+
 ## 适用层图例
 
 平台按 `docs/platform-roadmap.md` 的 L0-L6 能力层分阶段建设。每条原则标注适用层：
@@ -74,6 +76,7 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 - 路由引擎、转换引擎在 Rust 内核；路由 / 转换**规则**由 Go 非内核配置并经快照推给 Rust 执行（Rust 是执行引擎，规则配置在 Go）。
 - **上下文桥（ContextMaterializer）归 Go**：带 `previous_response_id` / `previous_interaction_id` 的有状态请求，由 Go 查 ConversationTimeline + materialize 成完整 messages/contents/input items 后推给 Rust 透传。Rust 内核**无状态**，不持有会话历史。请求分流：无上下文请求（无 previous_id）直入 Rust，Go 不介数据路径；带上下文请求经 Go materialize 再推 Rust。
 - **Rust「请求转换」**指无状态 body 改写（如 `include_usage` 注入）与协议桥（Responses->Messages 语义转换）；**materialize（状态衍生的请求构造）归 Go**，不在 Rust。
+- **声明式 TransformPlan + Rust 编译计划**：转换规则用声明式描述（marketplace schema 规则），Rust 内核把声明式规则**编译成 Rust 执行计划**（运行时高效执行，非解释执行）。放弃 Rhai 作为默认扩展路线；复杂第三方逻辑未来优先考虑签名 WASM（安全边界清晰）。声明式规则由 Go+React marketplace 配置，经快照推 Rust 编译执行。
 - L0-L2 控制面无此管线，走 Go net/http + chi 中间件链 + authorize 边界。
 
 ## VII. SOLID【横切】
@@ -103,6 +106,7 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 - adapter 声明支持的能力族（而非只注册 endpoint handler）；暴露 namespace；不支持的能力族显式拒绝（返回明确「不支持」错误，不静默 / 畸形透传）。
 - adapter 拥有 Provider 特定转换（错误体形状、认证方式描述符）。
 - 保留 Provider 命名空间边界，不同 Provider 能力与转换不相互越界。
+- **10 个能力族**（蓝图 9）：`generation.stateless`（Chat Completions/Messages/generateContent）、`generation.stateful`（Responses/Interactions/managed agents）、`realtime.live`（Realtime/Live WebSocket）、`embedding`、`batch`、`file.media`、`image.audio.video`、`tools.agents`（function calling/MCP/code execution/computer use）、`safety.moderation`、`platform.admin`。L3 起逐步覆盖，`generation.stateless` 优先；其余后置（见路线图 §3D）。
 - L0-L2 无 Provider 概念；provider key 在 L1 仅作加密保管的 opaque 凭据（KeyVault 在 Rust 内核，Go 非内核经 gRPC 调加解密），不解析其能力。
 
 ## XII. 热重载【L3+，Rust 内核】
@@ -149,7 +153,11 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 - 密钥经引用解析或加密存储；上游 Provider Key 不由 adapter 直接接触（L3+，Rust 内核）。
 - Admin / 所有特权操作经 `Principal` / `AuthContext` / `authorize(action, resource)` 边界；不存在「全局 admin token 等值判断」硬编码鉴权；为 OAuth / OIDC / SSO 预留身份映射边界。
 - 上游 TLS 默认校验（L3+，Rust 内核）。
-- 默认不持久化完整 prompt / response 内容，仅记录元数据与指标；内容持久化需租户 / 项目策略显式开启；协议桥接需历史内容时保存加密短期可过期状态（远期）。
+- **内容持久化策略（按上下文桥转化类型，非「默认不持久化」）**：
+  - 不开上下文桥：无状态透传，不持久化 prompt / response，仅记录元数据 + 指标。
+  - 开上下文桥 + 同态透传（如 Responses -> Responses，不跨协议）：provider 服务端存状态，PingoGate 只存 response_id / interaction_id 映射，不存完整内容。
+  - 开上下文桥 + 跨协议转化（如 Responses -> Chat Completions，有状态桥到无状态）：**必须存完整 ConversationTimeline**（否则无法 materialize），加密短期可过期，受 ContextPolicy（TTL / 加密 / 脱敏 / 租户隔离）控制。
+  - 完整内容持久化（非桥接必需）需租户 / 项目策略显式开启。
 
 ## XXI. 性能【L3+热路径，Rust 内核】
 - 延迟预算：无状态透传网关在上游延迟之外的额外开销 < 5 ms p50 / < 20 ms p95（Pingora 级）。
