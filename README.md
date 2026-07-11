@@ -15,8 +15,7 @@
 项目以「用户优先 / BYOK 为基座」重写。旧实现（路由优先单管理员代理）已归档至 `redesign` 分支，仅作历史参考。
 
 - **宪法**：[`.claude/rules/constitution.md`](.claude/rules/constitution.md)（I~XXII 原则 + 双语言内核架构总纲）
-- **蓝图**：[`docs/blueprint/`](docs/blueprint/)（完整产品愿景，BYOK 详见第 16A 节）
-- **路线图**：[`docs/platform-roadmap.md`](docs/platform-roadmap.md)（SaaS 平台 L0-L6 能力层分解）
+- **路线图**：[`docs/platform-roadmap.md`](docs/platform-roadmap.md)（SaaS 平台 L0-L6 能力层 + 里程碑 + 横切架构）
 
 ## 技术栈
 

@@ -54,7 +54,7 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 - `console/`：嵌入式控制台前端（TypeScript / React，L6 实现，L0-L5 仅预留空目录）。
 - `deploy/`：部署配置（Dockerfile / K8s，双二进制打包）。
 - `scripts/`：辅助脚本。
-- `docs/`：文档（蓝图 / 路线图 / feature specs）。
+- `docs/`：文档（路线图 / feature specs / 调研）。
 - `.claude/`：AI 协作规则（本宪法 / skills 配置）。
 
 `core-rs/` 内部按能力层组织 crate：`core`（共享域类型 / 错误 / 身份边界）、`storage`（快照 / KeyVault 加解密）、`pipeline`（Pingora 管线）、`router`（路由引擎）、`transform`（转换引擎）、`provider`（adapter + 能力族）、`listener`（server / listener 装配）、`snapshot`（RuntimeSnapshot + ArcSwap）、`pingogate-core`（主二进制：bootstrap / 信号 / 装配）。依赖方向自底向上无环，`core` 不依赖任何内部 crate。
