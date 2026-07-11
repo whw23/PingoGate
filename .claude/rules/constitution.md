@@ -1,108 +1,139 @@
 # PingoGate 项目宪法（Project Constitution）
 
-> **来源与保真说明**：本宪法从 `001-gateway-foundation` feature 的 `plan.md` / `research.md` / `spec.md` 对宪法的引用中提取重建，对应宪法 **v1.6.0**。内容为原则转述，**非逐字原文**——逐字原文未进入仓库，仅以引用形式散落在 001 specs 中。如发现原则与实际宪法源文件有出入，以宪法源文件为准并回写本文件。
+> **来源与保真说明**：本宪法从 `001-gateway-foundation` feature 的 `plan.md` / `research.md` / `spec.md` 对宪法的引用中提取重建，对应宪法原 v1.6.0；后据 BYOK SaaS 平台方向整理（分层标注 + 目录重构 + 补 BYOK 安全）。内容为原则转述，**非逐字原文**。如与宪法源文件有出入，以宪法源文件为准并回写本文件。
 >
 > 本文件作为项目级 rules 放置在 `.claude/rules/`，对 PingoGate 的所有 AI 协作与代码实现具有**上位约束力**。新 feature 的 spec / plan / 实现 MUST「以宪法为准」。
 
+## 适用层图例
+
+平台按 `docs/platform-roadmap.md` 的 L0-L6 能力层分阶段建设。每条原则标注适用层：
+
+- **横切**：所有层强制（含 L0 控制面地基）。
+- **L0+**：控制面层起强制（L0 身份 / L1 密钥 / L2 虚拟key / L4 多租户 / L5 用量 / L6 计费控制台）。
+- **L3+热路径**：数据面热路径起强制（L3 Pingora 管线 / L5 用量计量 / L6 规模化）。L0-L2 无热路径，这些原则暂不触发，但实现时不得为后续埋坑。
+
 ---
 
-## I. 复杂度层级判定
-每个 feature 在 plan 阶段判定复杂度层级（简单 / 中等 / 复杂），并按层级强制对应下述原则的闸门要求。判定依据：新增模块数量、跨模块耦合、条件业务逻辑、是否涉及协议桥 / 上下文虚拟化 / 多租户控制面等。中等及以上强制全部原则；简单可降级部分原则的闸门要求。Complexity Tracking 记录所有违规与豁免理由。
+## I. 复杂度层级判定【横切】
+每个 feature 在 plan 阶段判定复杂度层级（简单 / 中等 / 复杂），并按层级强制对应下述原则的闸门要求。判定依据：新增模块数量、跨模块耦合、条件业务逻辑、是否涉及数据面管线 / 上下文虚拟化 / 多租户控制面等。中等及以上强制全部适用原则；简单可降级部分原则的闸门要求。Complexity Tracking 记录所有违规与豁免理由。
 
-## II. DRY / KISS / YAGNI
+## II. DRY / KISS / YAGNI【横切】
 - 强制。范围严格限定在 spec 的 FR；不投机抽象；延后能力不预先建框架。
-- 不为实现未排期能力预留框架，只预留「位置」（trait 边界、目录层、配置字段）。
+- **不为实现未排期能力预留框架，只预留「位置」**（trait 边界、目录层、配置字段、枚举变体）。
+- 路线图（`docs/platform-roadmap.md`）未到的能力层 crate 不建空壳；到了再建。
 
-## III. 技术栈锁定
+## III. 技术栈锁定【横切】
 - 核心后端 100% Rust（Safe Rust，`unsafe` 禁止除非显式评审）。
-- **热路径 MUST 使用 Pingora**（`pingora` / `pingora-proxy` / `pingora-core`）。自建 hyper/axum 代理用于热路径被否。热路径 = 数据面每请求执行的请求管线（v2 路由/鉴权/透传）。
+- **热路径 MUST 使用 Pingora**（`pingora` / `pingora-proxy` / `pingora-core`）。自建 hyper/axum 代理用于热路径被否。热路径 = 数据面每请求执行的请求管线（L3 起）。L0-L2 无热路径，Pingora 不触发。
 - **管理面（控制面 API + 控制台托管）MAY 使用 axum**：OAuth 流 / 会话 / REST CRUD / 中间件 / 静态资源托管等富控制面能力，axum 是正确工具；Pingora `ServeHttp` 仅用于与热路径共用运行时的轻量管理端点。
 - 异步运行时 tokio；序列化 serde（+ serde_json / serde_yaml）；日志 tracing + tracing-subscriber；指标 Prometheus / metrics + OpenTelemetry。
-- **控制面存储 MAY 使用 sea-orm**（SQL 抽象层，SQLite / Postgres 可切换，落宪法 X「Control Plane State 可选后端」）；热路径零 DB 访问，仅读内存快照。
+- **控制面存储 MAY 使用 sea-orm**（SQL 抽象层，SQLite / Postgres 可切换，落宪法 X「Control Plane State 可选后端」）；**热路径零 DB 访问**，仅读内存快照（L3 起 RuntimeSnapshot）。
 - 依赖最小化：除上述 axum / sea-orm 外，新增非锁定 crate 须在实现 PR 附理由。管理面优先复用成熟 crate（oauth2、tower-sessions 等）而非手搓 OAuth / 会话 / CSRF。
 - 前端仅 TypeScript（嵌入式控制台），所有权限 / 校验 / 策略 / 敏感操作留在 Rust。
 
-## IV. 目录结构
-- 顶层目录：`app/` `console/` `deploy/` `scripts/`（宪法 v1.6.0 确定，以宪法为准，覆盖蓝图早期 `product/` 草图）。
-- `app/` 为 Cargo workspace，按架构层级拆 crate，每个 crate 对应一个层级且不跨层。
-- 依赖方向自底向上无环；跨层调用只经各 crate 公共 trait / 类型。
-- 根目录作为 AI 协作壳；新功能不属于现有层级时应先扩展 / 拆分定义层级。
+## IV. 目录结构【横切】
+- 顶层目录：`app/` `console/` `deploy/` `scripts/` `docs/` `.claude/`。
+  - `app/`：Rust 后端 Cargo workspace。
+  - `console/`：嵌入式控制台前端（TypeScript/React，L6 实现，L0-L5 仅预留空目录）。
+  - `deploy/`：部署配置（Dockerfile / K8s，L6 规模化）。
+  - `scripts/`：辅助脚本。
+  - `docs/`：文档（蓝图 / 路线图 / feature specs）。
+  - `.claude/`：AI 协作规则（本宪法 / skills 配置）。
+- `app/` 内部**按 `docs/platform-roadmap.md` 的 L0-L6 能力层组织 crate**，每个 crate 对应一个能力层且不跨层。当前及规划 crate：
+  - 横切：`core`（共享域类型 / 错误 / 身份边界）、`storage`（ControlPlaneStore / UsageSink trait + sea-orm 实现 + KeyVault 加解密）、`pingogate`（主二进制：bootstrap / 信号 / 装配）。
+  - L0：`identity`（User / OAuth / 会话 / API token / bootstrap admin）。
+  - L1：`keymgmt`（BYOK provider key CRUD / 1Password 可见性 / 生命周期状态机）。
+  - L2：`vkey`（虚拟 key 签发 / scoped / 撤销）。
+  - L3：`pipeline`（Pingora ProxyHttp 管线）、`provider`（adapter + 能力族）、`listener`（server / listener 装配）、`config`（RuntimeSnapshot + ArcSwap 热重载）。
+  - L4：`tenant`（Tenant / Project / RBAC）。
+  - L5：`usage`（UsageSink 实现 + 指标 + 流式计量）。
+  - L6：`billing`（计费 / 配额 / 限流）。
+- 依赖方向自底向上无环：`core` ← `storage` ← {`identity`/`keymgmt`/`vkey`/`tenant`/`usage`/`billing`} ← {`admin`/`pipeline`/`provider`/`listener`/`config`} ← `pingogate`。`core` 不依赖任何内部 crate（打破循环）。
+- 跨层调用只经各 crate 公共 trait / 类型；根目录作为 AI 协作壳；新功能不属于现有层级时先扩展 / 拆分定义层级。
 
-## V. 代码指标
+## V. 代码指标【横切】
 - 文件 ≤ 300 行；函数 ≤ 50 行；参数 ≤ 4；圈复杂度 ≤ 10；嵌套 ≤ 3。
 - 在实现与 CI 强制。
 
-## VI. 请求管线化
+## VI. 请求管线化【L3+热路径】
 - 请求路径拆成稳定管线，各阶段映射到 Pingora `ProxyHttp` 的 filter 回调；Provider adapter 不拥有网关生命周期。
 - 管线：入口 -> 协议识别 -> 鉴权授权 -> 上下文解析 -> 路由 -> 策略 -> 请求转换 -> 上游派发 -> 响应转换 -> 上下文提交 -> 可观测性 -> 用量计费。
 - adapter 负责 Provider 命名空间、能力声明、Provider 特有转换，不负责把整个系统绑死。
 - 鉴权在 `request_filter` 早期短路；上游认证在 `upstream_request_filter` 单点注入，adapter 不接触明文 Key 与 body / 连接。
+- L0-L2 控制面无此管线，走 axum REST CRUD + authorize 边界。
 
-## VII. SOLID
-- adapter / authenticator / router 等聚焦 trait；构造期注入；组合优先于继承。
+## VII. SOLID【横切】
+- adapter / authenticator / router / store 等聚焦 trait；构造期注入；组合优先于继承。
 
-## VIII. 低耦合高内聚
-- 引入 `core` 共享类型 / 错误 crate 打破循环依赖；crate 间仅经公共 trait / 类型通信。
+## VIII. 低耦合高内聚【横切】
+- `core` 共享类型 / 错误 crate 打破循环依赖；crate 间仅经公共 trait / 类型通信。
 
-## IX. 错误处理
+## IX. 错误处理【横切 + L3+ 补充】
 - 完整分类：`AppError`（Domain / Application / Infrastructure / Validation）。
 - HTTP 状态码仅在边界映射；不在内部层泄漏 HTTP 语义。
-- 网关自身错误在管线边界镜像目标 Provider 的原生错误体；协议识别前失败回退 PingoGate 原生错误体；上游自身错误原样透传不改写。
+- **L0-L2 控制面**：标准 REST 错误体（含错误码、消息、可选详情），经 authorize 边界返回。
+- **L3+ 数据面**：网关自身错误在管线边界镜像目标 Provider 的原生错误体；协议识别前失败回退 PingoGate 原生错误体；上游自身错误原样透传不改写。
 
-## X. 状态分离
+## X. 状态分离【横切】
 三类状态严格分离：
 - **Capability Repository**（系统能做什么）：provider 能力声明、模型元数据、转换 / 策略模板、未来签名能力包。**不保存**用户密钥、租户策略、用量、计费、会话状态。
-- **Runtime Config**（实例如何运行）：listener、domain、certificate、enabled providers、upstream channels、model routing、policy、metrics、reload。来源 YAML / TOML / JSON / env / K8s ConfigMap / DB 发布版本。
-- **Control Plane State**（谁在使用、用了多少）：users、tenants、projects、API keys、provider keys、quota、budgets、usage、billing、audit、conversation state。来源 SQLite / Postgres / MySQL / Redis / 对象存储。
+- **Runtime Config**（实例如何运行，L3 起）：listener、domain、certificate、enabled providers、upstream channels、model routing、policy、metrics、reload。来源 YAML / TOML / JSON / env / K8s ConfigMap / DB 发布版本。
+- **Control Plane State**（谁在使用、用了多少）：users、tenants、projects、API keys、virtual keys、provider keys、quota、budgets、usage、billing、audit。来源 SQLite / Postgres / MySQL / Redis / 对象存储。（conversation state 属远期协议桥，L6 之后，非近期。）
 
-重载不触控制面状态；不可变 `RuntimeSnapshot` + `ArcSwap` 原子切换。
+重载不触控制面状态；不可变 `RuntimeSnapshot` + `ArcSwap` 原子切换（L3 起）。L0-L2 控制面 CRUD 直连 DB，无 RuntimeSnapshot。
 
-## XI. Provider 抽象（能力族）
+## XI. Provider 抽象（能力族）【L3+】
 - adapter 声明支持的能力族（而非只注册 endpoint handler）；暴露 namespace；不支持的能力族显式拒绝（返回明确「不支持」错误，不静默 / 畸形透传）。
 - adapter 拥有 Provider 特定转换（错误体形状、认证方式描述符）。
 - 保留 Provider 命名空间边界，不同 Provider 能力与转换不相互越界。
+- L0-L2 无 Provider 概念；provider key 在 L1 仅作加密保管的opaque凭据，不解析其能力。
 
-## XII. 热重载
+## XII. 热重载【L3+】
 - `ArcSwap` snapshot；候选配置 校验 -> 构建 -> 原子切换 -> 记录版本 / 回滚目标；失败不改活跃 snapshot。
 - 进行中请求继续使用启动时绑定的旧 snapshot，零中断。
 - 触发源：SIGHUP / Admin API / 文件监视 / 仓库 revision / UI publish。
 - 不原地修改 live route table；不加载 native `.so` / `.dylib` / `.dll` 插件作为主路径。
+- L0-L2 控制面变更经 CRUD 直达 DB + 失效相关缓存，不走 RuntimeSnapshot 热重载。
 
-## XIII. TDD
-- 契约 / 集成 / 单元测试先写并观察失败；覆盖管线、透传往返、重载、鉴权边界。
+## XIII. TDD【横切】
+- 契约 / 集成 / 单元测试先写并观察失败。
+- L0-L2 覆盖：身份边界、key 加解密、1Password 可见性、authorize 判定、CRUD 往返。
+- L3+ 覆盖：管线阶段、透传往返、重载、鉴权边界、流式中断。
 
-## XIV. 文档与注释
+## XIV. 文档与注释【横切】
 - 公共 API 英文文档注释；项目文档中文。
 
-## XV. 原子提交
+## XV. 原子提交【横切】
 - Conventional Commits；按工作单元拆分。
 
-## XVI. CodeGraph
+## XVI. CodeGraph【横切】
 - 存在 `.codegraph/`；编辑前用 `codegraph_explore` 评估影响。
 
-## XVII. AI 技能
+## XVII. AI 技能【横切】
 - 涉及库 / API 用 context7 查文档；auth / key / TLS 变更合并前走 security-review；功能完成走 code-review / simplify / verify。
 
-## XVIII. Subagent 监控
+## XVIII. Subagent 监控【横切】
 - 如用 subagent 则监控其存活。
 
-## XIX. 可观测性
-- `tracing` 结构化日志，带贯穿管线的 trace / 请求 ID。
-- Prometheus 指标，按 provider + 能力族（必需）打标签，MAY 按 principal id（非明文密钥）归因。
-- 必需观测信号：请求量、状态码、延迟、上游延迟、retries、fallback、token 计数（input / output / reasoning / cache）。
-- 密钥 / token 经统一脱敏层后才输出。
+## XIX. 可观测性【L0+ 管理 + L3+/L5 热路径】
+- **L0+ 管理面**：`tracing` 结构化日志，管理操作审计（who/what/when），密钥脱敏。
+- **L3+ 热路径**：`tracing` 带贯穿管线的 trace / 请求 ID；Prometheus 指标按 provider + 能力族（必需）打标签，MAY 按 principal id（非明文密钥）归因。
+- **L5 用量**：必需观测信号--请求量、状态码、延迟、上游延迟、retries、fallback、token 计数（input / output / reasoning / cache）。
+- 密钥 / token 经统一脱敏层后才输出（横切，所有层）。
 
-## XX. 安全 / 保密 / 隐私
+## XX. 安全 / 保密 / 隐私【横切】
 - 100% Safe Rust。
-- 密钥经引用解析，明文 MUST NOT 进日志 / 指标 / 任何对外输出；上游 Provider Key 不由 adapter 直接接触。
+- **BYOK 可见性（1Password 模型）**：Provider Key（组织 key 或 BYOK key）明文可见性绑定 `created_by`，与 RBAC 正交。只有 `created_by` 能查看明文，其余任何人（任何角色、任何 admin）只见末位 + 元数据。BYOK key 的 `created_by` = owner user，故管理员不可见用户明文 key。明文只在 `KeyVault::decrypt()` 返回的受保护 `SecretString` 中存活，MUST NOT 进日志 / 指标 / 任何对外输出。
+- 密钥经引用解析或加密存储；上游 Provider Key 不由 adapter 直接接触（L3+）。
 - Admin / 所有特权操作经 `Principal` / `AuthContext` / `authorize(action, resource)` 边界；不存在「全局 admin token 等值判断」硬编码鉴权；为 OAuth / OIDC / SSO 预留身份映射边界。
-- 上游 TLS 默认校验。
-- 默认不持久化完整 prompt / response 内容，仅记录元数据与指标；内容持久化需租户 / 项目策略显式开启；协议桥接需历史内容时保存加密短期可过期状态。
+- 上游 TLS 默认校验（L3+）。
+- 默认不持久化完整 prompt / response 内容，仅记录元数据与指标；内容持久化需租户 / 项目策略显式开启；协议桥接需历史内容时保存加密短期可过期状态（远期）。
 
-## XXI. 性能
+## XXI. 性能【L3+热路径】
 - 延迟预算：无状态透传网关在上游延迟之外的额外开销 < 5 ms p50 / < 20 ms p95。
 - 零拷贝流式（SSE 不缓冲整流）；异步路径无阻塞 I/O；上游过载用显式背压而非无界队列。
 - 热路径变更加性能测试；每功能定义资源预算；`RwLock<Config>` 等写锁阻塞热路径读的方案被否。
+- L0-L2 控制面无热路径性能预算；管理面按人速 QPS 设计，但仍须异步无阻塞。
 
-## XXII. 项目语言
+## XXII. 项目语言【横切】
 - 文档中文；代码 / API / 提交信息英文。
