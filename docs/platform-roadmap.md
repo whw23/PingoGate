@@ -22,7 +22,11 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构（详见宪法「
 - **Rust 内核**（`core-rs/`，`pingogate-core` 二进制）：请求处理核心引擎 + 安全核心。Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 透传 / SSE）+ 路由引擎 + 转换引擎 + KeyVault（密钥加解密）+ 快照引擎。性能 / 正确性敏感、稳定少变。
 - **Go 非内核**（`ctrl-go/`，`pingogate-ctrl` 二进制）：业务面 + 平台治理。控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）+ OAuth / 会话 + 计费 / 用量 / 审计 + 控制台 BFF + DB。迭代频繁、生态依赖。
 - **通信**：Go 经 gRPC 把配置 / 密钥 / 虚拟 key 作为快照推给 Rust 内核；Rust KeyVault 解密后存内存快照，热路径零 DB 零解密。跨语言类型经 `proto/` codegen 同步。
-- **部署**：双二进制，可单 Docker 镜像。
+- **部署**：双二进制，可单 Docker 镜像。单仓库（`proto/` / `core-rs/` / `ctrl-go/` / `console/` / `deploy/` / `docs/` / `.claude/`），proto 为 Rust / Go 共享根。
+- **双运行模式**：Rust 内核同一二进制支持两种形态：
+  - **单机模式（standalone）**：内核单独跑，从 `pingogate-core.yaml` 加载路由 / 上游 / 静态网关 key，provider key 用密钥引用（`env:VAR`，不加密），无 Go、无 DB。轻量 LLM 网关（蓝图 3.1 单二进制优先）。KeyVault 不启用。
+  - **平台模式（platform）**：内核 + Go 非内核，gRPC 推快照（虚拟 key / 加密 provider key / 计费规则），KeyVault 解密，多用户 BYOK 隔离 + 用量计量 + 计费。完整 SaaS 平台。
+  - 单机模式是内核最小可用形态；平台模式是增强。两模式共享数据面管线 / 路由 / 转换引擎，仅快照来源与鉴权模式不同。
 
 **分界原则**：请求从进到出的整条处理链路（含路由 / 转换）+ 安全核心 = Rust；围绕这条链路的配置 / 治理 / 业务 = Go。
 
@@ -54,8 +58,9 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 
 | 里程碑 | 包含层 | 价值 |
 |---|---|---|
-| **M1**：BYOK 密钥平台 | L0 + L1 | 一个能安全存 BYOK key 的多用户平台（已可用） |
-| **M2**：BYOK 网关 | L0 + L1 + L2 + L3 | 能调模型的 BYOK 网关（真正 MVP） |
+| **M0**：内核单机网关 | L3（单机模式） | Rust 内核单独跑，文件配置 + 静态 key，无 Go 无 DB，一个可用的轻量 LLM 网关 |
+| **M1**：BYOK 密钥平台 | L0 + L1 | Go 控制面 + Rust KeyVault，能安全存 BYOK key 的多用户平台 |
+| **M2**：BYOK 网关 | M1 + L2 + L3（平台模式） | 能调模型的 BYOK 网关（真正 MVP） |
 | **M3**：多租户治理 | M2 + L4 + L5 | 有组织治理与用量观测的网关 |
 | **M4**：完整 SaaS 平台 | M3 + L6 | 计费配额 + 控制台 + 多协议 + 规模化 |
 
@@ -221,6 +226,6 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 
 ## 8. 当前状态
 
-- **当前轮次**：L0 + L1（M1 里程碑）的 brainstorming / spec 编写中。
-- **已完成**：仓库重置到 `dev` 分支（orphan，仅设计资产）；宪法 III 微调（承认管理面 axum + 控制面 sea-orm）。
+- **当前轮次**：架构定局后的 brainstorming。内核双模式（M0 单机 / M2 平台）已定；下一步选首个 feature spec（候选：M0 内核单机网关，或 M1 BYOK 密钥平台）。
+- **已完成**：仓库重置到 `dev` 分支（orphan，仅设计资产）；宪法定局双语言内核架构（Rust 内核 + Go 非内核，双运行模式）；路线图 L0-L6 + M0-M4。
 - **归档**：001-gateway-foundation（路由优先单管理员代理）在 `redesign` 分支，仅作历史参考。
