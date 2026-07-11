@@ -141,13 +141,12 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 
 ### L5 - 可观测 + 用量：流式计量与指标
 
-**职责**：让流量可见、可计量，为计费铺路。**token 计量在 Rust 内核，查询/计费在 Go 非内核**（宪法 XIX）。
+**职责**：让流量可见、可计量，为计费铺路。**Rust 只提取现成 usage，估算全 Go，查询/计费在 Go**（宪法 XIX）。
 
-- **Rust 内核用量采集**：热路径采集 token -> 内存通道 -> 批量推 Go（Rust 零 DB）。带 tokenizer（tiktoken-rs）做本地估算。
-- **三种用量来源**：(1) 响应带 usage--解析 SSE 末尾 usage（注意 OpenAI 流式需 `include_usage: true`，可能由转换引擎改写请求注入）；(2) 响应不带 usage--本地 tokenizer 估算 input/output；(3) 失败响应--input 仍计（请求已发上游），output 按已吐部分计（0 或部分），流中断做终态对账。
-- **增量采集 + 终态对账**：每收一 SSE chunk 增计 output；流正常结束或中断（超时 / 客户端断开 / 上游错）都做终态对账落库，失败不丢 input。
+- **Rust 内核用量提取**：只提取 provider 响应中**现成**的 usage 字段（OpenAI `stream_options.include_usage` / Anthropic `message_delta` / Gemini `usageMetadata`），增量记录 + 终态对账，推 Go。**Rust 不带 tokenizer、不做估算**（各 provider tokenizer 算法不同，维护繁琐，交 Go 生态）。Rust 零 DB。
+- **Go 非内核估算**：响应无 usage 时由 Go 用 tokenizer 估算（Rust 推 body，复用上下文 materialize 的 body 或专门推）；**失败 / 中断的部分计量归 Go**（Rust 推已转发部分，input 仍计因请求已发上游，output 按已吐部分）；用量聚合 / 落库（可插拔 sink：SQL / 未来 Redis / Kafka）/ 查询 / 计费 / 配额规则（人速业务，RBAC）。
+- **单机模式**：Rust 只提取现成 usage（记 log / 指标，不落 DB）；无 usage 不估算（尽力而为，因无 Go）。
 - Prometheus 指标（按 provider + 能力族 + principal 打标签，宪法 XIX）；tracing 结构化日志 + 贯穿管线 trace id；密钥脱敏（宪法 XX）。
-- **Go 非内核**：收 Rust 推来的用量事件聚合 / 落库（可插拔 sink：SQL / 未来 Redis / Kafka）；用量查询 / 计费 / 配额规则（人速业务，RBAC）。
 
 **预留位置**：partition 分片（L6）；计费消费（L6）。
 

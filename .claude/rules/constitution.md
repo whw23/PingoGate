@@ -8,9 +8,9 @@
 
 PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 
-- **Rust 内核**（`pingogate-core` 二进制）：**无状态**请求处理核心引擎 + 安全核心 + 用量采集。性能 / 正确性敏感、稳定少变、不可替代。包括：Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 上游认证注入 / 响应转换 / SSE 零拷贝透传 / 错误镜像）、路由引擎（别名 / 权重 / fallback / 健康检查）、转换引擎（无状态 body 改写 / 协议桥，不含 materialize）、KeyVault（密钥加解密，安全核心）、快照引擎（RuntimeSnapshot + ArcSwap，内存）、**用量采集（token 采集 + tokenizer 本地估算 + 增量 + 终态对账；采集到内存通道后推 Go 落库，Rust 不落 DB）**。**Rust 内核零 DB、零持久状态**。
-- **Go 非内核**（`pingogate-ctrl` 二进制）：**所有状态** + 业务面 + 平台治理。迭代频繁、生态依赖。包括：控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）、OAuth / 会话、**上下文桥（ConversationTimeline 存储 + ContextMaterializer，处理带 previous_response_id / previous_interaction_id 的有状态请求）**、用量聚合 / 落库 / 查询 / 计费 / 配额 / 限流规则、审计、控制台后端 BFF、管理面（健康 / 就绪 / reload 编排）、DB。
-- **通信**：Go 非内核经 gRPC 把「配置 / 密钥 / 虚拟 key / 计费规则」作为快照推给 Rust 内核；Rust 内核 KeyVault 解密后存内存快照，热路径零 DB 零解密。Rust 内核用量采集到内存通道后批量推给 Go 落库。带上下文请求由 Go materialize 后推给 Rust 透传。**Rust 内核零 DB 访问**。跨语言类型经 protobuf codegen 同步。
+- **Rust 内核**（`pingogate-core` 二进制）：**无状态**请求处理核心引擎 + 安全核心 + 用量提取。性能 / 正确性敏感、稳定少变、不可替代。包括：Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 上游认证注入 / 响应转换 / SSE 零拷贝透传 / 错误镜像）、路由引擎（别名 / 权重 / fallback / 健康检查）、转换引擎（无状态 body 改写 / 协议桥，不含 materialize）、KeyVault（密钥加解密，安全核心）、快照引擎（RuntimeSnapshot + ArcSwap，内存）、**用量提取（只提取 provider 响应中现成的 usage 字段，不做估算、不带 tokenizer）**。**Rust 内核零 DB、零持久状态、不带 tokenizer**。
+- **Go 非内核**（`pingogate-ctrl` 二进制）：**所有状态** + 业务面 + 平台治理。迭代频繁、生态依赖。包括：控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）、OAuth / 会话、**上下文桥（ConversationTimeline 存储 + ContextMaterializer，处理带 previous_response_id / previous_interaction_id 的有状态请求）**、**用量估算（无 usage 时用 tokenizer 估算；失败 / 中断部分计量）+ 用量聚合 / 落库 / 查询 / 计费 / 配额 / 限流规则**、审计、控制台后端 BFF、管理面（健康 / 就绪 / reload 编排）、DB。
+- **通信**：Go 非内核经 gRPC 把「配置 / 密钥 / 虚拟 key / 计费规则」作为快照推给 Rust 内核；Rust 内核 KeyVault 解密后存内存快照，热路径零 DB 零解密。Rust 提取现成 usage 数字推 Go；无 usage 时 Rust 推 body 给 Go 估算（复用上下文 materialize 的 body 或专门推）。带上下文请求由 Go materialize 后推给 Rust 透传。**Rust 内核零 DB 访问、不带 tokenizer**。跨语言类型经 protobuf codegen 同步。
 - **部署**：双二进制，可打包进单个 Docker 镜像。单仓库（`proto/` / `core-rs/` / `ctrl-go/` / `console/` / `deploy/` / `docs/` / `.claude/` 共存），因 proto 为 Rust / Go 共享根，跨语言原子提交。
 - **双运行模式**：Rust 内核支持两种部署形态，同一二进制渐进增强：
   - **单机模式（standalone）**：内核单独运行，从 `pingogate-core.yaml` 文件加载路由 / 上游 / 静态网关 key，provider key 用密钥引用（`env:VAR`，不加密，单用户无隔离需求），无 Go、无 DB。一个可用的轻量 LLM 网关（对标蓝图 3.1 单二进制优先）。KeyVault 不启用。
@@ -136,7 +136,11 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 ## XIX. 可观测性【L0+ 管理（Go）+ L3+/L5 热路径与计量（Rust）】
 - **L0+ 管理面（Go）**：slog 结构化日志，管理操作审计（who/what/when），密钥脱敏。
 - **L3+ 热路径（Rust）**：tracing 带贯穿管线的 trace / 请求 ID；Prometheus 指标按 provider + 能力族（必需）打标签，MAY 按 principal id（非明文密钥）归因。
-- **L5 用量计量（Rust 采集 + Go 落库/查询）**：必需观测信号--请求量、状态码、延迟、上游延迟、retries、fallback、token 计数（input / output / reasoning / cache）。**token 采集在 Rust 内核**（流在 Rust；带 tokenizer 本地估算；增量采集 + 终态对账，失败请求也计 input、output 按已吐部分计；采集到内存通道后批量推 Go）；**用量聚合 / 落库 / 查询 / 计费 / 配额规则在 Go 非内核**（Go 收 Rust 推来的事件落 DB，人速业务，RBAC）。Rust 零 DB。
+- **L5 用量计量（Rust 提取现成 usage + Go 估算/落库/查询）**：必需观测信号--请求量、状态码、延迟、上游延迟、retries、fallback、token 计数（input / output / reasoning / cache）。
+  - **Rust 内核**：只提取 provider 响应中**现成**的 usage 字段（OpenAI `stream_options.include_usage` / Anthropic `message_delta` / Gemini `usageMetadata`），增量记录 + 终态对账，推给 Go。**Rust 不带 tokenizer、不做估算**（各 provider tokenizer 算法不同，维护繁琐，交 Go 生态）。
+  - **Go 非内核**：响应无 usage 时由 Go 估算（Rust 推 body 给 Go，复用上下文 materialize 的 body 或专门推）；**失败 / 中断的部分计量归 Go 估算**（Rust 推已转发部分）；用量聚合 / 落库 / 查询 / 计费 / 配额规则。Go 零 DB 限制不适用（Go 管 DB）。
+  - **单机模式**：Rust 只提取现成 usage（记 log / 指标，不落 DB）；无 usage 的请求不估算（尽力而为，因无 Go）。
+  - Rust 零 DB；跨进程传 body 只在估算需要时（且复用上下文 materialize 已有 body）。
 - 密钥 / token 经统一脱敏层后才输出（横切，所有层，双语言）。
 
 ## XX. 安全 / 保密 / 隐私【横切】
