@@ -9,7 +9,8 @@
 
 | 维度 | OpenAI Chat Completions | OpenAI Responses | Gemini generateContent | Gemini streamGenerateContent | Gemini Interactions | Anthropic Messages |
 |---|---|---|---|---|---|---|
-| 端点 | `POST /v1/chat/completions` | `POST /v1/responses` | `POST /v1beta/models/{m}:generateContent` | `POST /v1beta/models/{m}:streamGenerateContent` | `interactions.create`（REST） | `POST /v1/messages` |
+| 端点模式 | `POST {ver}/chat/completions` | `POST {ver}/responses` | `POST {ver}/models/{m}:generateContent` | `POST {ver}/models/{m}:streamGenerateContent` | `interactions.create`（REST） | `POST {ver}/messages` |
+| 版本前缀 | `/v1/`（OpenAI，稳定） | `/v1/` | `/v1beta/`（**可变**，曾 v1beta2/v1beta3） | 同左 | 待 API ref | `/v1/` + header `anthropic-version`（日期版本） |
 | 流式接口 | 单接口 + `stream:true` | 单接口 + `stream:true` | 独立接口（非流式） | **独立接口（流式）** | 单接口 | 单接口 + `stream:true` |
 | 认证 | `Authorization: Bearer` | `Authorization: Bearer` | `x-goog-api-key` 或 `?key=` | 同左 | API key | `x-api-key` + `anthropic-version` |
 | 上下文机制 | 完整 messages（无状态） | `previous_response_id`（**有状态**） | 完整 contents（无状态） | 同左 | `previous_interaction_id`（**有状态**） | 完整 messages（无状态） |
@@ -20,6 +21,7 @@
 1. **只有 Gemini 把流式/非流式拆成两个独立接口**（`:generateContent` vs `:streamGenerateContent`）；OpenAI/Anthropic 都是单接口 + body `stream:true`。
 2. **只有 OpenAI Responses 和 Gemini Interactions 是有状态协议**（带 `previous_id`），需经 Go 上下文桥 materialize。
 3. **OpenAI Chat Completions 流式默认不给 usage**，需 Rust 转换引擎注入 `stream_options.include_usage:true`。
+4. **版本前缀 provider 特定且可变**（`{ver}` 非固定）：OpenAI/Anthropic `/v1/`，Gemini `/v1beta/`（曾 v1beta2/v1beta3，未来可能 v1），其他 openai-compatible 各异。**协议识别不能硬编码版本前缀**，按路径结构特征（`/chat/completions` / `/messages` / `:generateContent` / `:streamGenerateContent`）匹配，版本前缀通配或经 provider profile / marketplace 配置。Anthropic 额外有 header `anthropic-version`（日期版本，独立于路径版本）。
 
 ---
 
@@ -29,7 +31,7 @@
 - OpenAI 维护 [openai-openapi](https://github.com/openai/openai-openapi) GitHub 仓库，含完整 OpenAPI 3.0 规范（请求/响应/错误 schema）。官方 $schema 存在。
 
 ### 请求
-- **端点**：`POST /v1/chat/completions`
+- **端点**：`POST {ver}/chat/completions`（{ver} 为版本前缀，OpenAI 当前 `/v1`，可变）
 - **Headers**：
   - `Authorization: Bearer <key>`（必需）
   - `Content-Type: application/json`（必需）
@@ -73,7 +75,7 @@
 - 同 [openai-openapi](https://github.com/openai/openai-openapi) 仓库，Responses 端点含完整 OpenAPI 规范。
 
 ### 请求
-- **端点**：`POST /v1/responses`
+- **端点**：`POST {ver}/responses`（{ver} 当前 `/v1`，可变）
 - **Headers**：同 Chat Completions（`Authorization: Bearer`、`Content-Type`、可选 org/project）
 - **Body 顶层字段**：
   - `model`（必需）
@@ -112,7 +114,7 @@
 - Google 通过 [Discovery API](https://ai.google.dev/api) 提供 API 规范（非标准 JSON Schema，但 Discovery 文档含字段定义）。无独立 $schema 文件，Discovery 文档为准。
 
 ### 请求
-- **端点**：`POST /v1beta/models/{model}:generateContent`（model 在 path）
+- **端点**：`POST {ver}/models/{model}:generateContent`（{ver} 当前 `/v1beta`，曾 v1beta2/v1beta3，可变）（model 在 path）
 - **Headers**：
   - `x-goog-api-key: <key>`（或 URL `?key=<key>` query）
   - `Content-Type: application/json`
@@ -151,7 +153,7 @@
 - 同 generateContent，Discovery 文档。
 
 ### 请求
-- **端点**：`POST /v1beta/models/{model}:streamGenerateContent`（**独立接口**，与 generateContent 不同 path action）
+- **端点**：`POST {ver}/models/{model}:streamGenerateContent`（{ver} 当前 `/v1beta`，可变）（**独立接口**，与 generateContent 不同 path action）
 - **`?alt=sse` 陷阱**：
   - 不带 `?alt=sse`：返回**分块 JSON 数组**（非标准 SSE，`[{chunk1},{chunk2},...]` 流式）
   - 带 `?alt=sse`：返回标准 SSE（`data: {chunk}\n\n`）
@@ -214,7 +216,7 @@
 - Anthropic 文档（platform.claude.com/docs）含字段定义；无独立 $schema 文件，文档为准。
 
 ### 请求
-- **端点**：`POST /v1/messages`
+- **端点**：`POST {ver}/messages`（{ver} 当前 `/v1`，可变；另有 header `anthropic-version` 日期版本）
 - **Headers**：
   - `x-api-key: <key>`（必需）
   - `anthropic-version: 2023-06-01`（必需）
@@ -255,9 +257,11 @@
 ## 7. 对内核/控制面设计的影响
 
 ### 协议识别（Rust 内核，宪法 VI）
+- **按路径结构特征匹配，不硬编码版本前缀**：识别 `/chat/completions` / `/messages` / `:generateContent` / `:streamGenerateContent` 等后缀模式，版本前缀 `{ver}` 通配（provider 特定且可变，见 §0 关键点 4）。
 - Gemini 靠 path action 区分流式：`:streamGenerateContent` vs `:generateContent`（`streaming_by_path` 标记）
 - OpenAI/Anthropic 靠 body `stream:true` 区分
-- 001 已正确处理，M0 移植复用
+- **001 的协议识别用精确路径匹配（`path == "/v1/chat/completions"`），硬编码了 v1，M0 移植时需改为路径模式匹配**（版本前缀通配或经 provider profile 配置）。
+- provider 的版本前缀 + endpoint 模式作为 provider profile 的一部分，可经 marketplace 配置（不硬编码）。
 
 ### usage 提取（Rust 内核，只提取现成 usage）
 | 接口 | Rust 提取方式 |
