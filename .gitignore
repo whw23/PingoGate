@@ -1,0 +1,25 @@
+.codegraph/
+.superpowers/
+.specify/integrations/.cache/
+.playwright-mcp
+
+# Rust / Cargo
+target/
+debug/
+release/
+**/*.rs.bk
+*.rlib
+*.prof*
+Cargo.lock.orig
+
+# Secrets / local env (never commit real keys — constitution XX)
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+*.log

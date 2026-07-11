@@ -1,0 +1,1515 @@
+      <section id="source-template" class="source-appendix" data-page="appendix">
+        <div class="section-head">
+          <div>
+            <h2>完整原文附录</h2>
+            <p class="section-note">正文保留提炼后的蓝图，完整 Markdown 原文统一放在这里，避免每个章节重复展开同一批信息。</p>
+          </div>
+          <span class="tag">Full source</span>
+        </div>
+        <div class="full-md-panel">
+          <details class="full-md-item">
+            <summary>文档元信息</summary>
+            <pre># PingoGate 未来蓝图
+
+日期：2026-05-28  
+状态：讨论稿  
+展示版：[中文未来蓝图 HTML](blueprint.html)</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>1. 终极目标</summary>
+            <pre>## 1. 终极目标
+
+PingoGate 的终极目标不是做一个简单的聊天代理，而是成为面向多模型时代的统一 AI 流量入口。
+
+它应该让开发者继续使用熟悉的 SDK 和协议，同时让平台统一处理：
+
+- 模型路由
+- Provider 兼容
+- 协议转换
+- 上下文状态
+- 文件和媒体
+- 实时会话
+- Batch 作业
+- 工具和 Agent 能力
+- 配额、预算、计费
+- 日志、指标、审计
+- 配置热重载和安全回滚
+
+长期看，PingoGate 应该达到 LiteLLM / New API 级别的网关和平台能力覆盖，但实现方式要更偏向：
+
+- Rust + Pingora 的高性能运行时
+- 单二进制优先
+- 声明式配置
+- Nginx 风格热重载
+- 清晰的 Provider 和能力边界
+- 默认轻量、可选增强的部署模型
+
+一句话：
+
+&gt; PingoGate 是一个 Rust + Pingora 驱动的 LLM Gateway / Proxy / Platform，用来统一 OpenAI、Gemini、Anthropic 和 OpenAI-compatible Provider 的请求入口、治理能力和未来协议桥接能力。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>2. 产品定位</summary>
+            <pre>## 2. 产品定位
+
+PingoGate 同时承担三个角色。
+
+### 2.1 高性能 LLM API 网关
+
+负责处理真实流量路径上的网关能力：
+
+- HTTP / HTTPS 入口
+- SDK 兼容路径
+- 鉴权
+- 模型路由
+- Provider 选择
+- 限流
+- 重试和回退
+- 流式传输
+- 上游健康检查
+- 指标和日志
+
+### 2.2 多租户 AI 模型平台
+
+长期需要支持平台治理能力：
+
+- 租户
+- 项目
+- 用户
+- Service Account
+- API Key
+- Provider Key
+- 模型目录
+- 渠道管理
+- 配额
+- 预算
+- 价格
+- 用量
+- 审计
+- 管理控制台
+
+### 2.3 多协议兼容和转换层
+
+PingoGate 不应该只支持 OpenAI-compatible chat completion。
+
+长期需要把这些 API 家族放进同一套架构里：
+
+- OpenAI
+- Google Gemini
+- Anthropic
+- OpenAI-compatible Provider
+- 未来更多 Provider 和 Agent API
+
+目标是让客户端尽量只改：
+
+- base URL
+- token
+- 模型名或模型别名
+
+而不是被迫重写业务调用路径。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>2A. 产品规划视角</summary>
+            <pre>## 2A. 产品规划视角
+
+### 产品形态
+
+- 开源单二进制网关：一个 `pingogate` 接管 AI 流量。
+- 团队自托管控制台：集中管理项目、Key、Provider、模型、用量和日志。
+- 企业 AI 流量治理平台：把预算、审计、身份和策略纳入治理。
+- Provider / Proxy 能力仓库：用 profile、catalog 和未来签名能力包扩展模型生态。
+
+### 核心用户
+
+- 应用开发者：少改代码，接入统一网关。
+- 团队管理员：集中管理 Key、模型、预算、用量和排障。
+- 企业平台工程师：把 AI 流量纳入基础设施治理。
+- AI Infra / DevOps：关注性能、观测、reload 和故障隔离。
+- Provider / Proxy 贡献者：用 profile 和测试贡献 Provider 支持。
+- 产品负责人：看清成本、趋势和能力覆盖。
+
+### 核心工作流
+
+- 接入 Provider：配置上游，验证后 reload。
+- 创建项目和 Key：应用使用网关 Key，不直接接触 Provider Key。
+- 替换客户端入口：只改 base URL、token 和模型名。
+- 查看用量和日志：按项目、模型、Provider 和状态排查。
+- 配置路由和 fallback：用策略降低上游波动影响。
+- 管理身份和审计：从 bootstrap 管理员走向 OAuth / OIDC / SSO。
+
+### 差异化与边界
+
+- 比通用代理更强：不只转发请求，而是治理 AI 流量。
+- 比重型平台更轻：默认单二进制，不强制数据库。
+- 比单纯兼容层更稳：先保留协议语义，再做转换。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>3. 设计原则</summary>
+            <pre>## 3. 设计原则
+
+### 3.1 单二进制优先
+
+默认部署产物是一个 `pingogate` 二进制。
+
+外部数据库、Redis、对象存储、Docker Compose、Kubernetes 等能力是增强项，不应该成为第一个可用版本的强制依赖。
+
+### 3.2 后端只用 Rust
+
+核心后端能力使用 Rust 实现。
+
+TypeScript 只用于嵌入式 Web 控制台前端。所有权限、校验、策略和敏感操作都应留在 Rust 管理 API 中。
+
+### 3.3 SDK 兼容优先
+
+公共路径应保持 provider-native 或 compatibility-native。
+
+不应把 `/openai/...`、`/anthropic/...`、`/google/...` 这类 Provider 前缀作为主 SDK 路径。
+
+客户端应该尽量能沿用官方 SDK。
+
+### 3.4 声明式配置和热重载优先
+
+运行时扩展从 Nginx 风格的声明式 reload 开始，而不是把动态 native plugin 作为主路线。
+
+核心 Provider 支持可以编译进二进制。未来如果要扩展插件能力，也应该先从能力仓库、WASM policy/converter、签名包等安全边界更清晰的方式开始。
+
+### 3.5 请求路径管线化
+
+Provider adapter 不应该拥有整个网关生命周期。
+
+请求路径应拆成稳定管线：
+
+```text
+入口
+-&gt; 协议识别
+-&gt; 鉴权授权
+-&gt; 上下文解析
+-&gt; 路由
+-&gt; 策略
+-&gt; 请求转换
+-&gt; 上游派发
+-&gt; 响应转换
+-&gt; 上下文提交
+-&gt; 可观测性
+-&gt; 用量计费
+```
+
+Provider adapter 负责 Provider 命名空间、能力声明和 Provider 特有转换，不负责把整个系统绑死。
+
+### 3.6 内容持久化受策略控制
+
+默认只记录元数据、指标和必要审计信息。
+
+完整 prompt / response 内容不应默认持久化。只有租户或项目策略明确允许时，才可以保存完整内容。
+
+协议桥接需要历史上下文时，可以保存加密、短期、可过期的桥接状态。
+
+### 3.7 外部依赖可选
+
+默认开发和轻量生产模式可以使用 file + memory。
+
+更高级部署可以选择：
+
+- SQLite
+- Postgres / MySQL
+- Redis
+- 对象存储
+- Docker Compose
+- Kubernetes</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>4. 终局架构</summary>
+            <pre>## 4. 终局架构
+
+终局架构可以从三层看：客户端入口、PingoGate 核心、上游 Provider 生态。
+
+```text
+客户端和应用
+  OpenAI SDK
+  Claude SDK
+  Gemini SDK
+  OpenAI-compatible Apps
+        |
+        v
+PingoGate 数据面
+  协议识别
+  鉴权授权
+  策略执行
+  模型路由
+  请求转换
+  流式处理
+  Realtime Session
+  文件媒体
+  Batch Jobs
+  上下文桥
+        |
+        v
+PingoGate 控制面
+  管理控制台
+  租户 / 项目 / Key
+  Provider 渠道
+  模型目录
+  预算 / 计费 / 审计
+  配置发布 / 热重载 / 回滚
+        |
+        v
+上游生态
+  OpenAI
+  Google Gemini
+  Anthropic
+  OpenAI-compatible Provider
+  未来更多 Provider
+```</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>5. 分层架构</summary>
+            <pre>## 5. 分层架构
+
+### 5.1 网关基础设施层
+
+负责基础网络和运行时入口：
+
+- listener
+- HTTP / HTTPS
+- HTTP/2
+- TLS
+- SNI
+- 证书选择
+- 公共入口和管理入口分离
+- 请求大小限制
+- 超时
+- CORS
+- IP allow / deny
+- mTLS
+- 上游 TLS 校验
+
+### 5.2 请求管线层
+
+负责所有热路径逻辑：
+
+- 协议识别
+- 鉴权
+- 上下文解析
+- 模型路由
+- Provider 选择
+- 策略执行
+- 请求转换
+- 上游派发
+- 响应转换
+- 上下文提交
+- 指标
+- 日志
+- 用量记录
+
+### 5.3 Provider 命名空间层
+
+负责 Provider API 家族和能力族声明：
+
+- OpenAI namespace
+- Gemini namespace
+- Anthropic namespace
+- OpenAI-compatible namespace
+- 未来 Provider namespace
+
+每个 Provider adapter 应声明自己支持哪些能力族，而不是只暴露 endpoint handler。
+
+### 5.4 上下文桥层
+
+负责状态化协议模拟和无状态上游 materialization。
+
+核心对象包括：
+
+- `ClientStateRef`
+- `ConversationTimeline`
+- `ProviderStateRef`
+- `ContextMaterializer`
+- `ContextPolicy`
+
+这一层是 PingoGate 长期差异点。
+
+### 5.5 控制面层
+
+负责平台治理状态：
+
+- Tenant
+- Project
+- User
+- Service Account
+- API Key
+- Provider Key
+- Channel
+- Model Catalog
+- Pricing
+- Quota
+- Budget
+- Certificate
+- Audit
+
+控制面不应只有企业管理员的全局配置视角。它需要同时支持：
+
+- 管理员视角：租户、Provider Key、渠道、模型目录、价格、全局策略、证书、reload、审计。
+- 用户 / 项目负责人视角：项目、项目 API Key、预算、限流、用量、请求日志、文件、数据留存策略。
+
+普通用户不应直接接触上游 Provider Key、全局 reload、证书和跨租户审计。
+
+### 5.6 运行配置层
+
+负责配置加载、验证和发布：
+
+- YAML / TOML / JSON 配置
+- 环境变量
+- Kubernetes ConfigMap / Secret
+- DB-backed published revision
+- 能力仓库同步
+- 配置校验
+- RuntimeSnapshot 构建
+- 原子切换
+- 回滚
+
+### 5.7 嵌入式控制台层
+
+控制台是 TypeScript 前端，构建成静态资源后嵌入 Rust 二进制。
+
+前端只是客户端。所有权限、校验、审计和敏感操作都由 Rust 管理 API 执行。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>6. 数据面、控制面和状态分离</summary>
+            <pre>## 6. 数据面、控制面和状态分离
+
+PingoGate 需要明确区分三类数据。
+
+### 6.1 能力仓库 Capability Repository
+
+描述系统“能做什么”。
+
+内容包括：
+
+- Provider 能力声明
+- 模型元数据
+- 转换模板
+- 策略模板
+- 未来签名 WASM 能力包
+
+可选后端：
+
+- 本地目录
+- Git
+- HTTP registry
+- OCI artifact registry
+
+注意：能力仓库不应该保存用户密钥、租户策略、用量、计费或 conversation state。
+
+### 6.2 运行配置 Runtime Config
+
+描述“这个实例如何运行”。
+
+内容包括：
+
+- listener
+- domain
+- certificate
+- enabled providers
+- upstream channels
+- model routing
+- policy
+- metrics
+- reload settings
+
+可选后端：
+
+- YAML / TOML / JSON
+- 环境变量
+- Kubernetes ConfigMap / Secret
+- 数据库发布版本
+
+### 6.3 控制面状态 Control Plane State
+
+描述“谁在使用平台，以及用了多少”。
+
+内容包括：
+
+- users
+- tenants
+- projects
+- API keys
+- provider keys
+- quota
+- budgets
+- usage
+- billing
+- audit
+- conversation state
+
+可选后端：
+
+- SQLite
+- Postgres / MySQL
+- Redis
+- object storage</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>7. Nginx 风格热重载</summary>
+            <pre>## 7. Nginx 风格热重载
+
+PingoGate 应实现 Nginx 风格配置热重载，而不是把 native 动态库加载作为主路径。
+
+### 7.1 触发方式
+
+- `SIGHUP`
+- admin API reload command
+- file watcher
+- repository revision update
+- UI-triggered config publish
+
+### 7.2 Reload 流程
+
+1. 加载候选配置或仓库版本。
+2. 解析并做 schema 校验。
+3. 执行语义校验。
+4. 解析密钥引用，但不暴露密钥值。
+5. 校验证书、上游定义、模型路由、租户策略和 listener 变化。
+6. 构建不可变 `RuntimeSnapshot`。
+7. 执行 dry-run 检查和可选上游健康检查。
+8. 原子切换 active snapshot。
+9. 进行中的请求继续使用旧 snapshot。
+10. 记录 reload revision、状态、错误和 rollback target。
+
+### 7.3 实现方向
+
+- 使用 `Arc` + 原子 snapshot holder，例如 `ArcSwap`。
+- 新请求在接近入口处读取一次当前 snapshot。
+- 旧请求持有旧 snapshot 直到完成。
+- listener 变化由 listener manager 处理，因为端口和 socket 不能像路由表一样简单替换。
+- reload 失败不能修改当前 active runtime。
+
+### 7.4 热重载范围
+
+- routes
+- models
+- channels
+- upstreams
+- auth policy
+- static gateway keys
+- rate limits
+- budget policy
+- metrics sinks
+- Provider capability enablement
+- certificate files
+- domain mappings
+- context bridge policy
+- plugin / capability repository metadata
+
+### 7.5 主路径不做的事
+
+- 默认加载 Rust `.so`、`.dylib`、`.dll` 插件。
+- 原地修改 live route table。
+- 中断进行中的请求。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>8. Provider API 范围</summary>
+            <pre>## 8. Provider API 范围
+
+PingoGate 应按能力族建模 Provider，而不仅仅按 endpoint 建模。
+
+Endpoint parity 很重要，但 capability parity 更重要。
+
+### 8.1 OpenAI
+
+长期适配器应预留这些 API 家族：
+
+- Responses
+- Conversations 和 conversation items
+- Chat Completions
+- legacy Completions
+- Realtime
+- realtime sessions
+- client secrets
+- calls
+- transcription sessions
+- translations
+- Audio speech / transcription / translation / voices / voice consent
+- Images generation / edits / variations
+- Videos 和 video content
+- Embeddings
+- Files 和 uploads
+- Vector stores 和 vector store search
+- Batches
+- Fine-tuning jobs / checkpoints / events / permissions / pause / resume / cancel
+- Evals 和 eval runs
+- Containers 和 container files
+- Models
+- Moderations
+- Skills
+- Assistants / threads / messages / runs / run steps
+- ChatKit sessions / threads
+- Organization 和 project management APIs
+
+早期不需要代理所有 OpenAI management API，但 OpenAI namespace 不应假设“只有生成接口”。
+
+### 8.2 Google Gemini
+
+长期适配器应预留这些 API 家族：
+
+- `generateContent`
+- streaming generation
+- Interactions API
+- Live API
+- Batch API
+- Embeddings
+- Files API
+- file input methods
+- context caching / cached content
+- token counting
+- Models
+- text / image / audio / video / document understanding
+- image generation / editing
+- Veo video generation
+- TTS through Gemini generation APIs
+- function calling
+- Google Search grounding
+- URL context
+- code execution
+- file search
+- built-in tools
+- OpenAI compatibility surface
+
+Gemini 同时有无状态和有状态表面：
+
+- `generateContent` 是稳定无状态生成入口。
+- Interactions 是有状态 agentic 入口。
+- Live 是独立的长连接双向会话入口。
+
+### 8.3 Anthropic
+
+长期适配器应预留这些 API 家族：
+
+- Messages API
+- Messages streaming over SSE
+- tool use
+- extended thinking
+- vision and document inputs
+- prompt caching
+- Message Batches
+- Files
+- Models
+- Usage and admin APIs
+- MCP connector
+- computer use
+- Claude Managed Agents
+- OpenAI SDK compatibility surface
+
+Anthropic Messages 应视为 full-context stateless generation，并带有 prompt-prefix caching 能力。
+
+它没有类似 OpenAI Responses `previous_response_id` 或 Google Interactions `previous_interaction_id` 的通用会话延续模型。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>9. 能力族</summary>
+            <pre>## 9. 能力族
+
+Provider adapter 应声明能力族，而不是只注册 endpoint handler。
+
+### 9.1 `generation.stateless`
+
+代表无状态或全上下文生成。
+
+例子：
+
+- OpenAI Chat Completions
+- Anthropic Messages
+- Gemini generateContent
+- DeepSeek chat completions
+- 其他 OpenAI-compatible chat
+
+### 9.2 `generation.stateful`
+
+代表 Provider 或 PingoGate 可追踪状态的生成。
+
+例子：
+
+- OpenAI Responses
+- OpenAI Conversations
+- Google Interactions
+- future managed agent APIs
+
+### 9.3 `realtime.live`
+
+代表长连接、双向、低延迟交互。
+
+例子：
+
+- OpenAI Realtime
+- Gemini Live
+- 未来 Provider realtime surfaces
+
+### 9.4 `embedding`
+
+例子：
+
+- OpenAI Embeddings
+- Gemini Embeddings
+- future embedding providers
+
+### 9.5 `batch`
+
+例子：
+
+- OpenAI Batches
+- Gemini Batch API
+- Anthropic Message Batches
+
+### 9.6 `file.media`
+
+例子：
+
+- OpenAI Files and Uploads
+- Gemini Files API
+- Anthropic Files
+- PingoGate object references
+
+### 9.7 `image.audio.video`
+
+例子：
+
+- OpenAI Images / Audio / Videos
+- Gemini image / Veo video / TTS
+- Anthropic multimodal input
+
+### 9.8 `tools.agents`
+
+例子：
+
+- function calling
+- hosted tools
+- MCP
+- code execution
+- computer use
+- search grounding
+- managed agents
+
+### 9.9 `safety.moderation`
+
+例子：
+
+- moderation
+- guardrails
+- content policy
+- sensitive data policy
+
+### 9.10 `platform.admin`
+
+例子：
+
+- models
+- usage
+- costs
+- API keys
+- tenants
+- projects
+- channels
+- certificates
+- rate limits
+
+每个能力族都应有自己的：
+
+- compatibility matrix
+- route policy
+- usage metering
+- transformation plan</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>10. 协议兼容和转换</summary>
+            <pre>## 10. 协议兼容和转换
+
+PingoGate 支持三种 API 模式。
+
+### 10.1 原生透传 Native Pass-through
+
+客户端使用 Provider 原生协议。
+
+PingoGate 将请求转发到相同 Provider 协议，同时提供：
+
+- 鉴权
+- 路由
+- 策略
+- 指标
+- 日志
+- 审计
+
+### 10.2 兼容表面 Compatibility Surface
+
+客户端使用标准兼容协议，例如：
+
+- OpenAI-compatible
+- Claude-compatible
+- Gemini-compatible
+
+PingoGate 可以路由到原生支持该表面的 Provider，或路由到 converter。
+
+### 10.3 协议桥 Protocol Bridge
+
+客户端协议和上游协议不同。
+
+PingoGate 需要转换：
+
+- request
+- response
+- streaming events
+- state references
+- usage metadata
+
+重要桥接路径：
+
+- OpenAI Responses -&gt; OpenAI Chat Completions
+- OpenAI Responses -&gt; Anthropic Messages
+- OpenAI Responses -&gt; Gemini generateContent
+- Google Interactions -&gt; Gemini generateContent
+- Google Interactions -&gt; OpenAI Chat Completions
+- Google Interactions -&gt; Anthropic Messages
+- Chat Completions -&gt; Responses
+- generateContent -&gt; Interactions
+- Claude-compatible -&gt; OpenAI-compatible / Gemini-compatible
+
+推荐架构：
+
+```text
+Client Protocol Emulator
+-&gt; Conversation Timeline
+-&gt; Capability IR
+-&gt; Upstream Materializer
+```
+
+不要把每一对协议都做成一个独立的大 converter。
+
+Provider 特有逃生口仍然必要，用于：
+
+- reasoning traces
+- tool calls
+- multimodal inputs
+- computer use
+- MCP
+- thinking signatures
+- realtime session events</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>11. 上下文桥和会话状态虚拟化</summary>
+            <pre>## 11. 上下文桥和会话状态虚拟化
+
+上下文桥是 PingoGate 的长期核心差异点。
+
+例子：
+
+- Codex 使用 OpenAI Responses。
+- 客户端通过 `previous_response_id` 增量传递上下文。
+- DeepSeek 只支持 Chat Completions，需要每次传完整 `messages`。
+- PingoGate 必须模拟 Responses API，生成自己的 response id，保存足够的 conversation timeline，并在下一轮 materialize 成完整 Chat Completions messages。
+
+同类场景包括：
+
+- Responses -&gt; Anthropic Messages
+- Responses -&gt; Gemini generateContent
+- Interactions -&gt; Chat Completions
+- Interactions -&gt; Anthropic Messages
+- Interactions -&gt; generateContent
+
+### 11.1 核心对象
+
+`ClientStateRef`
+
+- PingoGate 对客户端可见的 `response_id`
+- `interaction_id`
+- session id
+- custom conversation id
+
+`ConversationTimeline`
+
+- 用户回合
+- 工具调用
+- 工具结果
+- assistant outputs
+- reasoning metadata references
+- attachments
+- provider response metadata
+
+`ProviderStateRef`
+
+- upstream response ids
+- conversation ids
+- interaction ids
+- cached content ids
+- prompt cache markers
+- provider-specific cache metadata
+
+`ContextMaterializer`
+
+- 输出完整 messages
+- Anthropic message blocks
+- Gemini contents
+- OpenAI input items
+- cache controls
+- provider state ids
+
+`ContextPolicy`
+
+- 内容持久化策略
+- TTL
+- 加密
+- 脱敏
+- 租户隔离
+- 是否允许 bridge
+
+### 11.2 默认策略
+
+- 默认 metadata-first observability。
+- 默认不保存完整 prompt / response 日志。
+- 协议桥接需要历史内容时，可保存加密短期内容。
+- 完整 conversation history management 是显式租户或项目功能。
+
+如果租户完全禁用内容持久化，PingoGate 必须禁用需要历史 materialization 的桥接路径，只允许 native stateless / full-context 或 provider-stateful 路径。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>12. Realtime 和 Live API</summary>
+            <pre>## 12. Realtime 和 Live API
+
+Realtime / Live API 需要独立于普通 request / response 和 SSE 的管线。
+
+需要的概念：
+
+- session lifecycle
+- client secrets / ephemeral tokens
+- WebSocket
+- WebRTC
+- bidirectional event stream
+- audio frames
+- text events
+- video / image streams
+- tool events
+- session-scoped policy
+- long-lived connection metrics
+- backpressure
+- idle timeout
+- max session duration
+- circuit breaking
+- graceful close
+- event translation
+
+OpenAI Realtime 和 Gemini Live 应是一等能力族。
+
+Anthropic 当前更适合通过 streaming Messages、tool workflows 和 agent workflows 接入，而不是映射成直接 Live API 等价物。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>13. 文件、媒体和对象存储</summary>
+            <pre>## 13. 文件、媒体和对象存储
+
+文件不是边缘功能，而是基础设施。
+
+它被这些能力依赖：
+
+- OpenAI Responses tools
+- OpenAI Files / Uploads / Vector Stores / Fine-tuning / Batch / Images / Videos
+- Gemini Files API
+- Gemini multimodal prompting
+- Gemini Batch / Interactions / Live
+- Anthropic Files
+- Anthropic document inputs
+- Anthropic Messages / Batches
+- PingoGate context bridge attachments
+- ConversationTimeline
+
+需要 Provider-neutral 文件引用模型：
+
+```text
+PingoGateFileRef
+-&gt; owner tenant/project
+-&gt; storage backend
+-&gt; provider file references
+-&gt; purpose
+-&gt; content type
+-&gt; size
+-&gt; retention policy
+-&gt; encryption metadata
+```
+
+早期可以透传 Provider file id。
+
+后期应支持本地对象存储，以及在策略允许时做跨 Provider 文件 materialization。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>14. Batch Jobs</summary>
+            <pre>## 14. Batch Jobs
+
+Batch API 需要 job model，而不是简单 proxy。
+
+通用模型：
+
+- create job
+- upload or reference input
+- route to provider-specific batch API
+- poll or receive callback
+- stream or download results
+- normalize status
+- attribute usage and cost
+- retain or purge input/output according to policy
+
+长期目标：
+
+- OpenAI Batches
+- Gemini Batch API
+- Anthropic Message Batches
+
+Batch jobs 对 LiteLLM / New API 级别的批量低成本工作负载很重要。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>15. 指标、用量、成本和计费</summary>
+            <pre>## 15. 指标、用量、成本和计费
+
+PingoGate 应暴露分层可观测性。
+
+### 15.1 请求指标
+
+- request rate
+- status
+- latency
+- upstream latency
+- retries
+- fallback count
+
+### 15.2 Token 指标
+
+- input tokens
+- output tokens
+- reasoning tokens
+- cache read / write tokens
+
+### 15.3 成本指标
+
+- provider cost
+- tenant price
+- margin
+- quota consumption
+
+### 15.4 缓存指标
+
+- prompt cache hit / miss
+- context cache hit / miss
+- bridge materialization size
+
+### 15.5 Realtime 指标
+
+- session duration
+- audio / video bytes
+- event count
+- interruptions
+- disconnect reason
+
+### 15.6 Batch 指标
+
+- queue time
+- processing time
+- success / failure counts
+- item-level status
+
+### 15.7 网关指标
+
+- TLS errors
+- certificate expiry
+- listener health
+- reload status
+
+### 15.8 指标 Sink
+
+- stdout structured logs
+- Prometheus
+- OpenTelemetry
+- database usage tables
+- audit event stream
+- future custom metric sink plugins</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>16. 鉴权、租户和策略</summary>
+            <pre>## 16. 鉴权、租户和策略
+
+长期数据模型：
+
+```text
+Tenant
+-&gt; Project
+-&gt; User / Service Account
+-&gt; API Key
+-&gt; Policy
+-&gt; Routes / Models / Channels
+-&gt; Quota / Budget / Rate Limits
+```
+
+### 16.1 鉴权模式
+
+- no-auth development mode
+- static gateway key mode
+- upstream key pass-through mode
+- virtual API key mode
+- tenant/project scoped API keys
+- service accounts
+- enterprise identity：OIDC / SAML / LDAP
+- BYOK user-scoped API keys（见 16A）
+
+### 16.2 策略维度
+
+- allowed models
+- allowed providers
+- allowed capability families
+- max request size
+- max context persistence
+- bridge permission
+- tool permission
+- realtime permission
+- file/media permission
+- budget
+- quota
+- rate limits
+- concurrency
+- data retention
+- audit</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>16A. BYOK（Bring Your Own Key）</summary>
+            <pre>## 16A. BYOK（Bring Your Own Key）
+
+管理员负责管理平台分发的模型和 Provider Key，但普通用户也应该能在平台上放置自己的模型和 Key。
+
+### 16A.1 核心概念：Channel Scope
+
+现有 Channel 概念扩展为分层模型：
+
+```text
+Channel
+  ├── scope: platform     ← 管理员创建，全平台分发
+  └── scope: user         ← 用户私有 BYOK
+```
+
+User Channel 和 Platform Channel 共享同一套数据结构和管线能力（Provider 类型、Key 加密、健康检查、重试、fallback、指标），区别只在所有权和可见性。
+
+### 16A.2 数据模型
+
+```text
+UserProviderKey
+  ├── id
+  ├── owner_user_id        ← 所属用户
+  ├── provider_type         ← openai / anthropic / gemini / openai-compatible
+  ├── encrypted_key         ← 加密存储的 Provider API Key
+  ├── base_url (optional)   ← 自定义 endpoint（适用 openai-compatible）
+  ├── created_at
+  └── last_used_at
+
+UserChannel
+  ├── id
+  ├── owner_user_id
+  ├── provider_key_id       ← 引用 UserProviderKey
+  ├── name / alias
+  ├── enabled_models[]      ← 用户声明此 Key 可用的模型列表
+  ├── model_aliases{}       ← 可选的模型别名映射
+  ├── priority / weight     ← 路由权重
+  ├── status                ← active / disabled / error
+  ├── health_check_policy   ← 可选健康检查策略
+  └── policy_overrides      ← 用户级策略覆盖（受平台策略约束）
+```
+
+### 16A.3 路由层变化
+
+请求管线中的模型路由步骤变为：
+
+```text
+请求进入 → 鉴权 → 识别用户身份
+  → 查找 User Channel（当前用户 + 请求模型）
+    → 有匹配 → 使用 User Channel 的 Provider Key 和上游配置
+    → 无匹配 → 回落到 Platform Channel（正常平台路由）
+```
+
+管理员可以通过平台策略控制：
+
+- 是否允许用户 BYOK（全局开关 / 租户级开关）
+- 用户 BYOK 是否允许 fallback 到平台分发模型
+- BYOK 请求是否受平台 rate limit / 配额约束
+
+### 16A.4 隔离性
+
+- 用户自带的 Key 和模型完全私有，只有本人可用。
+- 不支持将 BYOK 渠道共享给其他用户或项目成员。
+- 管理员无法查看用户的明文 Key（可见元信息：Provider 类型、创建时间、状态）。
+- 管理员可以禁用特定用户或全局的 BYOK 能力。
+
+### 16A.5 策略与治理
+
+BYOK 请求仍然经过完整的请求管线：
+
+- 用量统计：正常记录 token、延迟、状态码，但不走平台计费。
+- 请求日志：正常记录。
+- Rate Limit：受平台策略约束（可配置是否约束 BYOK）。
+- 审计：正常审计。
+- 模型白名单：用户 BYOK 声明的模型可受平台策略约束。
+
+### 16A.6 安全边界
+
+- 用户的 Provider Key 加密存储在平台数据库中，运行时解密使用。
+- 用户只能 CRUD 自己的 UserProviderKey 和 UserChannel。
+- BYOK 管理 API 必须通过 Principal / AuthContext / authorize(action, resource) 边界。
+
+### 16A.7 控制台
+
+用户控制台增加"我的模型"板块：
+
+- 管理自己的 Provider Key（增删改，Key 加密存储，UI 只显示末尾 4 位）。
+- 管理自己的 Channel（选择 Provider Key → 声明可用模型 → 启用/禁用）。
+- 查看 BYOK 请求的用量和日志。
+- 查看 BYOK Channel 的健康状态。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>17. 网关基础设施</summary>
+            <pre>## 17. 网关基础设施
+
+长期应支持完整网关能力：
+
+- HTTP listener
+- HTTPS listener
+- HTTP/2
+- SSE
+- WebSocket
+- WebRTC path
+- public / admin listener separation
+- multiple domains
+- virtual hosts
+- SNI certificate selection
+- local certificate files with hot reload
+- ACME / Let's Encrypt automation
+- upstream TLS verification
+- custom CA
+- request timeouts
+- request size limits
+- response size limits
+- CORS
+- IP allow / deny
+- mTLS
+- retry
+- fallback
+- weighted routing
+- circuit breaker
+- health checks
+- region-aware routing</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>18. 嵌入式管理控制台</summary>
+            <pre>## 18. 嵌入式管理控制台
+
+控制台是 TypeScript-only frontend，作为静态资源嵌入 Rust 二进制。
+
+### 18.1 初始控制台
+
+- bootstrap first admin
+- login / logout
+- bootstrap static admin auth through internal Principal / AuthContext
+- admin view：provider / channel / model config、reload、rollback、domain and certificate status
+- user view：project API key management、usage records、request logs、budget and quota visibility
+- reload status
+- rollback
+- basic request logs
+- basic metrics
+
+初始控制台即使能力较少，也要从信息架构上区分管理员视图和用户 / 项目视图。
+
+### 18.2 长期控制台
+
+- tenants
+- projects
+- users
+- service accounts
+- quotas
+- budgets
+- subscription
+- billing
+- model pricing
+- route and fallback editor
+- capability repository sync
+- rollback
+- prompt / context cache observability
+- conversation timeline debugging
+- batch jobs
+- files and media artifacts
+- realtime sessions
+- audit logs
+- enterprise identity settings
+- OAuth / OIDC / GitHub / Google login
+- SAML / LDAP / enterprise SSO
+
+控制台不直接承担安全逻辑。
+
+所有授权和校验都在 Rust admin APIs 中完成。第三方登录只负责把外部身份映射到内部 user、role、project membership 和 service account，不应该改变管理 API 的授权语义。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>19. LiteLLM 对齐清单</summary>
+            <pre>## 19. LiteLLM 对齐清单
+
+PingoGate 长期应覆盖这些 LiteLLM-class 能力：
+
+- OpenAI-compatible proxy endpoint
+- 100+ provider style architecture
+- model aliasing
+- provider routing
+- load balancing
+- fallback and retry
+- provider health checks
+- virtual keys
+- team and user budgets
+- rate limits
+- spend tracking
+- cost calculation
+- callbacks and logging
+- caching
+- guardrails and policy
+- admin UI
+- SSO-ready auth model
+- model hub and cost map
+- Docker / Kubernetes friendly deployment</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>20. New API 对齐清单</summary>
+            <pre>## 20. New API 对齐清单
+
+PingoGate 长期应覆盖这些 New API-class 能力：
+
+- OpenAI-compatible entry point
+- Claude-compatible entry point
+- Gemini-compatible entry point
+- OpenAI Responses support
+- OpenAI Realtime support
+- Claude Messages support
+- Google Gemini support
+- rerank capability family
+- image / music / video provider families
+- model aggregation and distribution
+- channel management
+- weighted random routing
+- automatic retry and failover
+- user-level model rate limiting
+- quota and token management
+- group management
+- model ratio / completion ratio / group ratio pricing
+- subscription and top-up billing
+- payment provider integration points
+- dashboard
+- playground
+- management API
+- channel testing
+- model metadata and pricing management
+- cache billing support
+
+PingoGate 不需要复制 New API 的每一个产品选择，但这些能力属于长期竞争覆盖范围。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>21. 阶段路线图</summary>
+            <pre>## 21. 阶段规划草案
+
+当前还没有决定每个 Phase 的交付内容。下面只是候选能力分组，用于讨论目标顺序，不代表现在立即拆任务。
+
+### 首个实现方向：原生模型接口透传
+
+候选目标：做出第一个有用的单二进制 LLM 网关。
+
+候选范围：
+
+- OpenAI-compatible Chat Completions pass-through
+- OpenAI Responses minimal pass-through where practical
+- Anthropic Messages pass-through
+- Gemini generateContent pass-through
+- Gemini Interactions minimal pass-through where practical
+- streaming / SSE pass-through
+- static gateway key mode
+- upstream key from config
+- optional upstream key pass-through
+- `pingogate.yaml`
+- Nginx-style reload for config / routes / upstreams / certificates
+- basic structured logs
+- basic Prometheus metrics
+- file / memory runtime
+- no UI requirement unless minimal embedded shell is cheap
+
+倾向延后：
+
+- cross-protocol conversion
+- full context bridge
+- multi-tenant DB
+- billing
+- realtime / live
+- batch
+- files / object store beyond pass-through needs
+
+### 候选能力：网关和平台基础
+
+候选范围：
+
+- embedded management console
+- Rust admin API
+- SQLite support
+- users
+- projects
+- API keys
+- admin global management
+- user / project self-service management
+- provider / channel / model management
+- model aliasing
+- rate limits
+- request logs
+- usage records
+- domain and certificate management
+- local certificate reload
+- route / fallback basics
+
+### 候选能力：LiteLLM / New API 核心网关对齐
+
+候选范围：
+
+- virtual keys
+- team / project budgets
+- model groups
+- weighted routing
+- fallback / retry policies
+- usage and cost accounting
+- provider health checks
+- OpenAI-compatible unified entry
+- Claude-compatible native entry
+- Gemini-compatible native entry
+- text generation protocol conversion
+- management console parity for model / channel / key management
+
+### 候选能力：上下文桥和有状态协议模拟
+
+候选范围：
+
+- PingoGate-generated Responses IDs
+- PingoGate-generated Interactions IDs
+- ConversationTimeline store
+- Responses -&gt; Chat Completions
+- Responses -&gt; Anthropic Messages
+- Responses -&gt; Gemini generateContent
+- Interactions -&gt; generateContent
+- Interactions -&gt; Chat Completions
+- Interactions -&gt; Anthropic Messages
+- encrypted short-lived bridge state
+- content retention policy
+- context cache and prompt cache observability
+
+### 候选能力：非文本和异步能力
+
+候选范围：
+
+- files / uploads
+- object store abstraction
+- embeddings
+- batch jobs
+- images
+- audio
+- videos
+- vector-like asset support where provider-native
+- prompt / context cache controls
+- provider file ID mapping
+
+### 候选能力：Realtime、Live、Tools 和 Agentic APIs
+
+候选范围：
+
+- OpenAI Realtime
+- Gemini Live
+- bidirectional session pipeline
+- session auth
+- ephemeral tokens
+- tool call event bridging
+- MCP support
+- computer use
+- code execution
+- search grounding
+- URL context
+- managed agent surfaces
+
+### 候选能力：企业能力和生态
+
+候选范围：
+
+- Postgres / MySQL
+- Redis coordination
+- multi-node gateway
+- multi-tenant SaaS controls
+- OIDC / SAML / LDAP
+- mTLS
+- ACME automation
+- full audit and retention policy
+- billing and payment integration points
+- capability repository sync
+- signed capability packages
+- WASM policy / converter plugins
+- Docker Compose deployment guide
+- Kubernetes deployment guide</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>22. 通往终局的第一块地基</summary>
+            <pre>## 22. 首个实现方向
+
+首个实现方向的价值不是追平所有平台能力，而是验证正确骨架。具体交付范围仍需后续确认。
+
+无论首个阶段怎么切，都应守住这些架构线：
+
+- 公共路径保持 vendor-native 或 compatibility-native。
+- 不把 `/openai/...`、`/anthropic/...`、`/google/...` 作为主 SDK 路径。
+- 通过 path、headers 和 request shape 做协议识别。
+- 按 protocol default + model/channel config 做路由。
+- 热路径配置使用 immutable runtime snapshot。
+- 即使 endpoint 少，也要保留 Provider namespace 边界。
+- 指标标签至少覆盖 capability family、provider、upstream、model、tenant/project placeholder、status、streaming mode。
+- 管理 API 即使只用 bootstrap 静态 token，也必须经过 Principal / AuthContext / authorize(action, resource) 抽象。
+- 即使只实现 file/memory，也要设计 storage traits。
+- 不支持的能力族要在配置和 API 响应中明确表达。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>23. 当前已确认决策</summary>
+            <pre>## 23. 当前已确认决策
+
+- Phase 1 主范围尚未决定；OpenAI Chat Completions、Anthropic Messages、Gemini generateContent 的原生透传只是首个实现方向候选。
+- Responses 和 Gemini Interactions 是否进入首个阶段尚未决定；如果进入，倾向只做同 Provider 原生透传。
+- 首个阶段倾向不模拟 Responses / Interactions 状态。
+- 首个阶段倾向不把 stateful API 桥接到 stateless upstream。
+- 用户主配置和 proxy profile 使用 YAML；marketplace catalog、安装锁文件和 schema 使用 JSON。TOML 不作为核心 profile 格式。
+- 小型 Rust admin API 是首个实现方向候选，可能覆盖 health、readiness、config validation、reload、reload status；Phase 1 可使用 bootstrap 静态管理员鉴权，但必须经由内部 Principal / AuthContext / authorize(action, resource) 边界。
+- OAuth、OIDC、GitHub / Google 登录和企业 SSO 倾向延后到控制台和用户体系阶段；早期只预留外部身份映射到内部用户、角色、项目成员关系和服务账号的边界。
+- 控制面长期同时支持企业管理员和用户 / 项目负责人；管理员管理全局资源，用户管理自己项目内的 Key、预算、用量、日志和数据策略。普通用户可通过 BYOK 自带 Provider Key 和模型，完全私有，仅本人可用。
+- 根目录作为 AI 协作壳，产品代码进入 `product/`；GitHub 承担源码协作、release 分发和 proxy/provider marketplace。
+- 默认分发 YAML/JSON 声明式 profile 包，描述 URL、header、query、body、streaming 和 capabilities。WASM 只作为未来高级扩展。
+- 放弃 Rhai 作为默认扩展路线。主路径使用声明式 TransformPlan 和 Rust 编译计划；复杂第三方逻辑未来优先考虑签名 WASM。
+- 嵌入式 TypeScript 控制台暂未排期，倾向不进入首个实现阶段。
+- 首个实现阶段可只暴露机器可读 admin APIs 和身份边界，不要求 UI。
+- 跨协议转换、ConversationTimeline、realtime/live、batch、files/object store、billing、多租户数据库倾向延后，但最终阶段归属尚未决定，架构中必须预留位置。
+- BYOK（Bring Your Own Key）：普通用户可在平台上放置自己的 Provider Key 和模型，完全私有。通过 Channel Scope 分层实现（scope: platform / user），复用现有 Channel 管线能力。BYOK 请求经过完整管线但不走平台计费。Key 加密存储，管理员不可见明文。管理 API 和控制台同时提供 BYOK 管理入口。</pre>
+          </details>
+          <details class="full-md-item">
+            <summary>24. 资料来源</summary>
+            <pre>## 24. 资料来源
+
+- OpenAI API reference overview: https://developers.openai.com/api/reference/overview
+- OpenAI data controls and endpoint families: https://developers.openai.com/api/docs/guides/your-data
+- OpenAI Realtime docs: https://developers.openai.com/api/docs/guides/realtime
+- OpenAI Batch docs: https://developers.openai.com/api/docs/guides/batch
+- Google Gemini Interactions API: https://ai.google.dev/gemini-api/docs/interactions
+- Google Gemini Live API: https://ai.google.dev/gemini-api/docs/live-api
+- Google Gemini Batch API: https://ai.google.dev/gemini-api/docs/batch-api
+- Google Gemini Embeddings: https://ai.google.dev/gemini-api/docs/embeddings
+- Google Gemini API docs: https://ai.google.dev/gemini-api/docs
+- Anthropic API overview: https://platform.claude.com/docs/en/api/overview
+- Anthropic Messages guide: https://platform.claude.com/docs/en/build-with-claude/working-with-messages
+- Anthropic streaming guide: https://platform.claude.com/docs/en/build-with-claude/streaming
+- Anthropic batch processing: https://platform.claude.com/docs/en/build-with-claude/batch-processing
+- Anthropic prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+- LiteLLM repository and docs: https://github.com/BerriAI/litellm
+- LiteLLM routing docs: https://docs.litellm.ai/docs/routing
+- LiteLLM budgets and rate limits docs: https://docs.litellm.ai/docs/proxy/users
+- New API repository: https://github.com/QuantumNous/new-api
+- New API project introduction: https://docs.newapi.ai/en/docs/guide/wiki/basic-concepts/project-introduction
+- New API API docs: https://docs.newapi.ai/en/docs/api</pre>
+          </details>
+        </div>
+      </section>
+
