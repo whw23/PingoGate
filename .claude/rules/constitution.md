@@ -15,9 +15,11 @@
 
 ## III. 技术栈锁定
 - 核心后端 100% Rust（Safe Rust，`unsafe` 禁止除非显式评审）。
-- 热路径 MUST 使用 Pingora（`pingora` / `pingora-proxy` / `pingora-core`）。自建 hyper/axum 代理用于热路径被否。
+- **热路径 MUST 使用 Pingora**（`pingora` / `pingora-proxy` / `pingora-core`）。自建 hyper/axum 代理用于热路径被否。热路径 = 数据面每请求执行的请求管线（v2 路由/鉴权/透传）。
+- **管理面（控制面 API + 控制台托管）MAY 使用 axum**：OAuth 流 / 会话 / REST CRUD / 中间件 / 静态资源托管等富控制面能力，axum 是正确工具；Pingora `ServeHttp` 仅用于与热路径共用运行时的轻量管理端点。
 - 异步运行时 tokio；序列化 serde（+ serde_json / serde_yaml）；日志 tracing + tracing-subscriber；指标 Prometheus / metrics + OpenTelemetry。
-- 依赖最小化：新增非锁定 crate 须在实现 PR 附理由。Admin / 非热路径优先复用 Pingora 自带能力（如 `ServeHttp`），不引入额外 HTTP 框架。
+- **控制面存储 MAY 使用 sea-orm**（SQL 抽象层，SQLite / Postgres 可切换，落宪法 X「Control Plane State 可选后端」）；热路径零 DB 访问，仅读内存快照。
+- 依赖最小化：除上述 axum / sea-orm 外，新增非锁定 crate 须在实现 PR 附理由。管理面优先复用成熟 crate（oauth2、tower-sessions 等）而非手搓 OAuth / 会话 / CSRF。
 - 前端仅 TypeScript（嵌入式控制台），所有权限 / 校验 / 策略 / 敏感操作留在 Rust。
 
 ## IV. 目录结构
