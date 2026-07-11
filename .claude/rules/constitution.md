@@ -23,7 +23,7 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 
 ## 适用层图例
 
-平台按 `docs/platform-roadmap.md` 的 L0-L6 能力层分阶段建设。每条原则标注适用层：
+平台按 `docs/01-platform-roadmap.md` 的 L0-L6 能力层分阶段建设。每条原则标注适用层：
 
 - **横切**：所有层强制（含 L0 控制面地基）。
 - **L0+**：控制面层起强制（L0 身份 / L1 密钥 / L2 虚拟key / L4 多租户 / L5 用量 / L6 计费控制台）。
@@ -37,7 +37,7 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 ## II. DRY / KISS / YAGNI【横切】
 - 强制。范围严格限定在 spec 的 FR；不投机抽象；延后能力不预先建框架。
 - **不为实现未排期能力预留框架，只预留「位置」**（trait / interface 边界、目录层、配置字段、枚举变体）。
-- 路线图（`docs/platform-roadmap.md`）未到的能力层模块不建空壳；到了再建。
+- 路线图（`docs/01-platform-roadmap.md`）未到的能力层模块不建空壳；到了再建。
 
 ## III. 技术栈锁定【横切】
 - **Rust 内核**：100% Safe Rust（`unsafe` 禁止除非显式评审）。热路径 MUST 使用 Pingora（`pingora` / `pingora-proxy` / `pingora-core`）。异步运行时 tokio；序列化 serde；日志 tracing；指标 Prometheus / OpenTelemetry。密钥加解密用 Rust 标准加密库（AES-GCM）。

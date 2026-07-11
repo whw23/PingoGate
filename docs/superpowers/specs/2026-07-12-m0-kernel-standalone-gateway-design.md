@@ -3,7 +3,7 @@
 > **Feature**：M0 内核单机网关（Kernel Standalone Gateway）
 > **日期**：2026-07-12
 > **状态**：Draft（待 review）
-> **路线图定位**：`docs/platform-roadmap.md` 里程碑 M0，能力层 L3（单机模式）
+> **路线图定位**：`docs/01-platform-roadmap.md` 里程碑 M0，能力层 L3（单机模式）
 > **上位约束**：`.claude/rules/constitution.md`（双语言内核架构总纲 + I~XXII）
 
 ## 1. 目标与范围

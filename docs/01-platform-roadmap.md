@@ -332,7 +332,7 @@ Rust 零 DB、不带 tokenizer；Go 管估算/落库/计费/配额。
 
 ## 3F. 非核心 Provider 接口后置
 
-蓝图 8 列了每个 provider 的完整 API 家族（OpenAI Responses/Conversations/Realtime/Files/Embeddings/Batches/Fine-tuning/Evals/Assistants...；Gemini Interactions/Live/Batch/Files...；Anthropic Messages/Batches/Files/MCP...）。本路线图核心覆盖 5 个主接口（OpenAI Chat Completions + Responses / Gemini generateContent + Interactions / Anthropic Messages，见 `docs/research/provider-schemas/`）。**其余非核心接口后置**，随能力族（§3D / 宪法 XI）逐步支持，不预先编排。
+蓝图 8 列了每个 provider 的完整 API 家族（OpenAI Responses/Conversations/Realtime/Files/Embeddings/Batches/Fine-tuning/Evals/Assistants...；Gemini Interactions/Live/Batch/Files...；Anthropic Messages/Batches/Files/MCP...）。本路线图核心覆盖 5 个主接口（OpenAI Chat Completions + Responses / Gemini generateContent + Interactions / Anthropic Messages，见 `docs/02-provider-schemas.md`）。**其余非核心接口后置**，随能力族（§3D / 宪法 XI）逐步支持，不预先编排。
 
 ## 3G. 已确认决策日志（蓝图 23 迁移）
 
