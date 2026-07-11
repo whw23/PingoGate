@@ -164,6 +164,157 @@ L6 计费配额 + 控制台 + 多协议 + 规模化（Redis / Kafka）
 
 **证伪目标**：完整 SaaS 平台闭环——可计费、有 UI、多协议、可规模化。
 
+## 3A. 鉴权架构（横切）
+
+鉴权分两个维度，严格分离：**inbound**（客户端 -> 网关，证明调用者身份）与 **outbound**（网关 -> 上游，注入 provider key）。核心分界原则：**Go 管理生命周期（CRUD / 签发 / 撤销 / scope 配置），Rust 执行热路径校验（查快照 / 鉴权 / 注入）**。Go 拥有鉴权数据写权，Rust 只读 Go 推来的快照。
+
+### Inbound 鉴权
+
+| 职责 | Go 管理 | Rust 执行 |
+|---|---|---|
+| 虚拟 key 签发（生成明文返用户一次 + 哈希存 DB） | ✅ | ❌ |
+| 虚拟 key 撤销 / 过期（更新 DB 状态 -> 推快照） | ✅ | ❌ |
+| 虚拟 key scope 配置（model / provider / IP / 过期 / 并发配额 / owner） | ✅ | ❌ |
+| 虚拟 key 哈希存储 | ✅ | ❌ |
+| scope 校验（热路径，验 model / provider / IP / 过期） | ❌ | ✅ 内存快照，零 DB |
+| 并发配额计数（在途流计数） | ❌ | ✅ 内存计数器，零 DB |
+| 虚拟 key 校验（哈希比对查快照 -> Principal） | ❌ | ✅ KeyAuth::authenticate |
+| RBAC authorize 边界（authorize(Proxy, route)） | ❌ | ✅ 热路径判定 |
+| 静态网关 key（单机模式，从 pingogate-core.yaml 加载） | ❌（无 Go） | ✅ |
+| OIDC / SAML 登录（控制台用户身份） | ✅ OAuth 流 + 会话 + 用户映射 | ❌ |
+| service account 管理（本质是 owner kind = SA 的虚拟 key） | ✅ | ❌ |
+
+### Outbound 上游认证
+
+| 职责 | Go 管理 | Rust 执行 |
+|---|---|---|
+| BYOK provider key 录入（Go 收明文 -> 转发 Rust 加密） | ✅ 触发 | ✅ KeyVault 加密 |
+| provider key 加密存储（Go 持密文 + 元数据，明文不落 Go/DB） | ❌（只持密文） | ✅ KeyVault 加密 |
+| provider key 解密（热路径，KeyVault::decrypt -> SecretString） | ❌ | ✅ 独占 |
+| 上游认证注入（upstream_request_filter，Bearer / x-api-key / query_key） | ❌ | ✅ 单点（宪法 VI） |
+| provider key 元数据 CRUD（name / type / 状态 / created_by） | ✅ | ❌ |
+| 1Password 可见性（明文仅 created_by，Go 校验 created_by 后调 Rust 解密） | ✅ 校验 created_by | ✅ 解密 |
+| provider key 轮换 | ✅ 触发 | ✅ 重新加密 |
+| 静态 provider key（单机模式，env:VAR 引用） | ❌（无 Go） | ✅ |
+
+### KeyVault 跨边协作（最微妙）
+
+```text
+BYOK provider key 录入：用户 -> Go API -> Rust KeyVault::encrypt(明文) -> 密文回 Go -> Go 存 DB
+BYOK provider key 查看明文（仅 created_by）：created_by -> Go 校验 -> Rust KeyVault::decrypt(密文) -> 明文回 Go -> 回用户（一次性）
+```
+
+**Go 持密文 + 元数据 + created_by 校验权；Rust 持加解密能力 + 主密钥**。Go 决定「谁能看」（1Password 规则校验 created_by），Rust 决定「怎么解」。明文不落 Go、不落 DB。录入时 Go 短暂接触明文（转发给 Rust 加密），可接受（前端只连 Go，不能为加密让客户端直连 Rust）。
+
+### 鉴权模式归并
+
+蓝图 16.1 列 8 种鉴权模式，在平台架构归并：
+
+| 归并后 | 蓝图原模式 | 实现层 | 何时 |
+|---|---|---|---|
+| 静态网关 key | no-auth + static gateway key | Rust 单机模式 | M0 |
+| 虚拟 key（平台唯一 inbound 模式） | virtual API key + tenant/project scoped + service accounts + BYOK user-scoped | Go 签发 + Rust 校验 | L2 |
+| 企业身份登录 | OIDC / SAML / LDAP | Go 控制台登录 | L6（宪法 XX 预留） |
+| ~~upstream key pass-through~~ | upstream key pass-through | 不实现 | 砍（违 BYOK 可见性，客户端知 provider key 破坏隔离） |
+
+**关键决策**：虚拟 key 是平台模式唯一 inbound 鉴权模式--scoped / tenant / service-account / BYOK 都是虚拟 key 的**属性**（scope / owner kind），不是独立模式。OIDC 只管控制台登录，不直接管 API 调用（登录后 Go 签发虚拟 key 给用户用）。
+
+## 3B. 协议转换架构（横切）
+
+PingoGate 的核心差异点（蓝图第 10/11 章）。三层分工，严格按 Go/Rust 分界：
+
+### 三层分工
+
+| 层 | 职责 | 归属 | 何时 |
+|---|---|---|---|
+| **无状态转换引擎** | body 改写（如 OpenAI `include_usage` 注入）、协议桥（Responses->Messages 语义转换）、Capability IR 转换 | Rust 内核（宪法 VI） | L3 起 |
+| **有状态 materialize** | 上下文桥：查 ConversationTimeline + materialize 成完整 messages/contents/input items | Go 非内核 | L3.5 |
+| **转换规则配置** | marketplace 可视化 schema 匹配，配置转换/materialize 规则 | Go + React | L6 |
+
+### Capability IR 架构（蓝图 10 推荐）
+
+不把每对协议做成独立大 converter，用中间 IR：
+
+```text
+Client Protocol Emulator -> ConversationTimeline -> Capability IR -> Upstream Materializer
+```
+
+- **Client Protocol Emulator**：识别客户端协议（OpenAI Responses / Gemini Interactions / 等），Rust。
+- **ConversationTimeline**：会话历史（用户回合 / 工具调用 / 工具结果 / assistant 输出），Go 存储。
+- **Capability IR**：协议无关的中间表示，Rust 转换引擎产出 / 消费。
+- **Upstream Materializer**：IR -> 目标 provider 协议（messages / contents / input items），有状态 materialize 在 Go，无状态转换在 Rust。
+
+### 桥接路径（蓝图 10.3，9 条，分阶段）
+
+有状态桥（经 Go materialize，依赖 ConversationTimeline）：
+- OpenAI Responses -> Chat Completions / Anthropic Messages / Gemini
+- Google Interactions -> Chat Completions / generateContent / Anthropic
+
+无状态桥（Rust 转换引擎）：
+- Chat Completions -> Responses
+- generateContent -> Interactions
+- Claude-compatible -> OpenAI-compatible / Gemini-compatible
+
+### 与 marketplace 的关系
+
+模型 schema 经常变（蓝图第 23 章已确认）。marketplace 存 schema 转换规则（Go+React 可视化匹配），驱动：
+- Rust 无状态转换引擎（规则经快照推 Rust 执行）
+- Go materialize（规则直接用）
+
+Go 不硬编码协议，按 marketplace 配置的规则转换 / materialize。
+
+## 3C. 计费与配额架构（横切）
+
+SaaS 平台商业闭环。用量链路、计费模型、配额机制分清。
+
+### 用量链路（Rust 提取 -> Go 估算/落库/计费）
+
+```text
+Rust 内核（热路径）
+  ├─ 提取 provider 响应现成 usage（OpenAI include_usage / Anthropic message_delta / Gemini usageMetadata）
+  ├─ 无 usage 时推 body 给 Go 估算
+  ├─ 失败/中断推已转发部分给 Go 估算
+  └─ 推 usage 事件（数字或 body）给 Go
+       ↓
+Go 非内核
+  ├─ 估算（无 usage / 失败时，用 tokenizer，各 provider 算法不同）
+  ├─ 聚合 + 落库（可插拔 sink：SQL / 未来 Redis / Kafka）
+  ├─ 计费（按 model ratio / completion ratio / cache billing 算成本）
+  └─ 配额扣减（读 Rust 推来的用量，扣 DB 配额）
+```
+
+Rust 零 DB、不带 tokenizer；Go 管估算/落库/计费/配额。
+
+### 计费模型（蓝图 15 + New API 20 对齐）
+
+- **model ratio / completion ratio / group ratio pricing**：不同模型不同价比，input/output 分计，组别比率（New API 模式）。
+- **cache billing**：prompt cache 命中如何计费（Anthropic prompt cache / Gemini cachedContent / OpenAI 自动缓存，命中 token 按折扣计）。
+- **subscription / top-up billing**：订阅 + 充值双模式，payment integration 预留（L6 远期）。
+- **成本归因**：按 user / project / provider / model 归因成本与用量。
+
+### 配额机制（运行时 vs 配置分离）
+
+| | Go | Rust |
+|---|---|---|
+| 配额配置（预算 / 限流上限 / 并发上限） | ✅ DB + 推快照 | ❌ |
+| 配额计数（运行时，已用量 / 在途并发） | ❌ | ✅ 内存（热路径零 DB） |
+| 配额扣减（落账） | ✅ 收 Rust 推来的用量扣 DB | ❌ |
+| 限流判定（热路径，超限拒绝） | ❌ | ✅ 查内存计数器 |
+
+**运行时配额计数在 Rust 内存（热路径零 DB），配置与扣减在 Go**。Rust 每请求查内存计数器判限流，Go 收用量事件扣 DB 配额。
+
+### 分层可观测（蓝图 15 八子类）
+
+请求指标 / token 指标 / 成本指标 / 缓存指标 / realtime 指标 / batch 指标 / 网关指标 / 指标 sink。L5 起逐步覆盖（realtime/batch 随其能力域）。
+
+## 3D. 远期能力域预留（蓝图 12/13/14，架构留位置不急实现）
+
+以下能力域蓝图标注「倾向延后但架构必须预留位置」。路线图留位置，不编排具体层，待核心（协议转换 / 计费 / 多租户）稳后独立 spec：
+
+- **Realtime / Live**（蓝图 12）：OpenAI Realtime / Gemini Live，WebSocket / WebRTC 双向长连接，会话生命周期。需独立管线（非 request/response），realtime.live 能力族。
+- **文件 / 媒体 / 对象存储**（蓝图 13）：PingoGateFileRef，跨 provider 文件 materialization。被 Responses tools / multimodal / batch 依赖。file.media 能力族。
+- **Batch Jobs**（蓝图 14）：OpenAI Batches / Gemini Batch / Anthropic Message Batches，job model。batch 能力族。
+
 ## 4. 横切约束（每层都适用）
 
 | 约束 | 来源 | 说明 |
