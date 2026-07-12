@@ -151,10 +151,11 @@ M0+M1 同态透传不区分有无 previous_id，都直入 Rust 原样转发（�
 
 ### 3.3 跨语言（`proto/`）
 
-gRPC 接口定义：
-- `SnapshotService.PushSnapshot`（Go -> Rust，stream）：推 RuntimeSnapshot（providers/routes/virtual_keys 哈希/加密 provider key）。
-- `KeyVaultService.Encrypt` / `Decrypt`（Go -> Rust，unary）：加解密 provider key。Decrypt 经 Go 校验 created_by 后调用。
+gRPC 接口定义（内部通信安全见 §12A：mTLS + 内部 token + 仅 127.0.0.1）：
+- `SnapshotService.PushSnapshot`（Go -> Rust，stream）：推 RuntimeSnapshot（providers/routes/virtual_keys 哈希/加密 provider key），带 version，Rust 回 ack（见 §12C 同步语义）。
+- `KeyVaultService.Encrypt` / `Decrypt`（Go -> Rust，unary）：加解密 provider key。Decrypt 请求含 `requester_user_id` + `key_id`，Go 校验 created_by 后调用，Rust 记审计日志（双层防御，见 §12A）。
 - `UsageService.ReportUsage`（Rust -> Go，stream）：Rust 推 usage 事件（数字或 body）。
+- `HealthService`（双向，unary）：心跳 + Rust 报告当前快照 version，Go 据此判断是否需重推全量（见 §12C 恢复）。
 
 跨语言类型经 protobuf codegen 同步 Rust / Go。
 
@@ -336,6 +337,57 @@ spec 覆盖完整设计，实现分三 plan，每 plan 独立可验证。具体�
 - **SC-11**：单机模式（无 Go）六接口透传可跑（Rust 独立可用）；平台模式（Go+Rust）完整闭环。
 - **SC-12**：`SnapshotSource`/`KeyAuth` trait 双实现，单机/平台模式切换。
 
+## 12A. 内部 gRPC 安全（宪法 XX 补充）
+
+Rust 内核与 Go 非内核间的 gRPC（快照推送 / KeyVault 加解密 / usage 上报）是内部通信，但**必须防本地任意进程调用**（否则本地恶意进程可调 `KeyVault.Decrypt` 解密所有 key）。
+
+- **传输**：本地 127.0.0.1 监听；默认 mTLS（Rust 与 Go 互验证书），单机模式无 gRPC 不涉及。开发环境可降级为明文（显式 `grpc.tls: false`，仅本地）。
+- **鉴权**：gRPC 元数据携带共享内部 token（`env:PINGO_INTERNAL_TOKEN`，启动时 Rust/Go 各自加载）；Rust 校验调用方 token，拒绝无 token / 错 token 的调用。
+- **KeyVault.Decrypt 专门约束**：即使 gRPC 鉴权通过，Rust 侧不单独信任 Go 的 created_by 校验--Rust 在 Decrypt 请求里要求 Go 传 `requester_user_id` + `key_id`，Rust 记审计日志（谁解密了谁的 key）。Go 侧 created_by 校验是第一道，Rust 审计是第二道（事后追责），双层防御。
+- **不暴露公网**：gRPC listener 仅 bind 127.0.0.1，不对外。
+
+## 12B. Bootstrap 流程
+
+平台模式首次启动的"鸡生蛋"问题：没有 admin 就无法创建用户/admin。
+
+- **bootstrap admin**：环境变量 `PINGO_BOOTSTRAP_ADMIN_TOKEN`（首次启动 Go 读取）。Go 启动时若 DB 无任何 admin，用此 token 创建首个 admin（Principal kind=Admin），之后该 env 可撤销。
+- **bootstrap admin 走 authorize 边界**：即使是 bootstrap，也经 `Principal::admin` + `authorize`，不绕过边界（宪法 XX）。
+- **主密钥**：`env:PINGO_MKEK`（KeyVault AES-GCM 主密钥），Go 启动时校验存在，缺失即启动失败（不给"明文存 key"的降级路径）。
+- **gRPC 内部 token**：`env:PINGO_INTERNAL_TOKEN`，Rust/Go 启动时各自加载，缺失即启动失败。
+- **Rust 首次全量同步**：Rust 启动后内存快照空，Go 检测到 Rust 连接（gRPC 建连）后立即推全量快照（providers/routes/virtual_keys/加密 key）；Rust 在收到首个全量快照前 `readyz` 返回 not-ready（拒绝流量）。
+
+## 12C. 快照同步与恢复
+
+平台模式 Rust 内存快照是 Go DB 状态的缓存副本，需保证一致与可恢复。
+
+- **权威源 = Go DB**：Rust 内存快照非权威，崩溃丢失无碍（Go 重推）。
+- **版本号**：每个快照带单调递增 `version`（Go 维护）。Rust 收到快照记 version；Go 推送时若 Rust 报告的 version 落后，推增量或全量。
+- **推送语义**：gRPC stream，Go 推 `Snapshot` 消息（全量；增量优化后置）。Rust 收到 -> 校验 -> ArcSwap 原子切换 -> 回 ack（含 version）。Go 未收 ack 不更新"已同步 version"。
+- **Rust 崩溃恢复**：Rust 重启 -> 内存空 -> Go 检测重连 -> 推全量 -> Rust ready。恢复期间 Rust not-ready。
+- **Go 崩溃恢复**：Go 重启 -> 读 DB -> 重建内存状态 -> 向 Rust 推当前全量快照。Rust 用旧快照继续服务（Go 崩溃期间 Rust 热路径不中断，因快照在 Rust 内存）。
+- **并发推送串行化**：Go 侧 snapshot 推送经 mutex 串行（同一时刻一个推送），避免乱序；Rust 侧 ArcSwap 原子切换保证一致性。
+- **最终一致**：短暂不一致可接受（Go DB 已改、Rust 未同步期间，Rust 用旧快照服务）。权威是 DB，对账后修正。
+
+## 12D. 测试策略（宪法 XIII）
+
+契约 / 集成 / 单元测试先行。
+
+- **单元**：
+  - Rust：协议识别（六接口 + 后缀模式 + 版本前缀通配 + 不支持能力 + 未识别）；上游认证注入（三方式）；模型别名提取；snapshot 构建与校验；KeyVault 加解密（AES-GCM 正确性）；StaticKeyAuth/VirtualKeyAuth；authorize 边界；usage 提取（各接口位置）；密钥脱敏。
+  - Go：User/ProviderKey/VirtualKey CRUD；1Password 可见性（created_by 校验，非创建者只见末位）；哈希存储；快照构建。
+- **集成**：
+  - Rust：管线阶段往返；六接口透传（非流式 + SSE，mock 上游）；热重载（成功切换 / 失败不改活跃 / 在途零中断）；单机/平台双模式切换。
+  - Go：控制面 API 往返；gRPC 推快照 Rust 接收；KeyVault 加解密 gRPC 往返。
+- **契约**：
+  - gRPC 接口双侧契约（proto 定义为契约，Rust/Go 各自生成 + 测试）：SnapshotService / KeyVaultService / UsageService。
+  - Admin API 契约（六端点 + 鉴权边界）。
+  - 六接口透传 + 镜像错误契约。
+- **安全测试（端到端）**：
+  - 1Password 可见性端到端：非 created_by 用户（含 admin）调看明文 API，断言只返回末位；created_by 调，断言返回明文但 Rust 审计日志记录。
+  - 密钥不泄漏：抓取所有日志/指标/错误体，断言 0 明文 key 出现（抽样审计）。
+  - gRPC 鉴权：无 token / 错 token 调 KeyVault.Decrypt，断言拒绝。
+- **基准**：无状态透传延迟基准（默认 `#[ignore]`，显式运行），回归阻止合入（p50 < 5ms / p95 < 20ms）。
+
 ## 13. 风险与未决
 
 - **R1 未决**：单机模式 admin 鉴权用单 token 还是一组具名 admin key？倾向单 token，S1 plan 定。
@@ -346,3 +398,6 @@ spec 覆盖完整设计，实现分三 plan，每 plan 独立可验证。具体�
 - **R6 风险**：KeyVault 热路径解密性能--平台模式每请求解密 provider key 是否缓存？倾向 S3 先不缓存（正确性优先），性能优化后置。
 - **R7 风险**：gRPC 快照推送一致性--Go 推送中途 Rust 用旧快照，需保证最终一致 + 版本号。S2 设计。
 - **R8 未决**：Gemini Interactions 完整 schema（`docs/02-provider-schemas.md` §8 待补充），S1 协议识别可能需实现期核对 API ref。
+- **R9 未决**：DB 迁移工具选型（sqlx migrate vs golang-migrate vs 手写）？倾向 sqlx migrate（与 sqlx 一体），S2 plan 定。
+- **R10 未决**：gRPC 内部 mTLS 证书怎么签发（自签 CA？启动时生成？）？倾向首次启动 Go 生成自签 CA + Rust/Go 各证书，S1 plan 定。
+- **R11 风险**：Rust 首次全量同步前 not-ready，若 Go 启动慢则 Rust 长时间拒流量；需 readiness 探针编排（K8s 部署时）。S3 部署配置考虑。
