@@ -45,13 +45,17 @@
 
 ### 1.3 不包含（Out of Scope，后置）
 
-- **多租户 Tenant/Project/RBAC**（L4）：M0+M1 扁平 User，无组织 / 角色 / 组织 key 共享。
-- **OAuth/OIDC/SSO**（L6）：M0+M1 用 bootstrap 静态 admin + 用户 CRUD（API token 鉴权），OAuth 登录后置。
-- **跨协议桥接 / 上下文虚拟化**（L3.5）：M0+M1 只做同态透传，不做跨协议桥（Responses->Chat Completions 等）。`previous_response_id` / `previous_interaction_id` 原样转发。跨协议桥需 Go 上下文桥（ConversationTimeline + ContextMaterializer），后置。
-- **用量计费/配额/限流**（L5/L6）：M0+M1 提取 usage 落库，但不计费 / 不配额 / 不限流（配额计数运行时在 Rust 内存，L5 引入）。
-- **嵌入式控制台**（L6）：M0+M1 仅机器可读 API，无 React 控制台。
-- **多协议桥 / Realtime / 文件 / Batch**（远期，蓝图 10/12/13/14）：后置。
-- **token 估算**：Rust 不带 tokenizer；Go 仅在无 usage / 失败时估算，M0+M1 估算范围有限（先覆盖有 usage 的主流路径）。
+以下**完全不做**，后置到对应能力层。注意：usage 提取与落库、Go token 估算（无 usage/失败时）、虚拟 key、KeyVault 加密、1Password 可见性均**在 Scope**（见 §1.2），不在此列。
+
+- **多租户 Tenant/Project/RBAC**（L4）：M0+M1 扁平 User，无 Tenant/Project 层级、无角色枚举、无组织 key 共享。组织 key（成员共享）后置 L4；M0+M1 只有 BYOK key（用户私有）。
+- **OAuth/OIDC/SSO 登录**（L6）：M0+M1 用 bootstrap 静态 admin + API token 鉴权（用户/管理操作均走 authorize 边界），OAuth 第三方登录后置 L6。
+- **计费 / 配额 / 限流**（L5/L6）：M0+M1 提取 usage 落库（In Scope），但**不做**计费（model ratio / 成本 / 账单）、配额扣减（预算扣减落账）、限流（运行时配额计数 + 超限拒绝）。这些后置 L5/L6（配额运行时计数在 Rust 内存，L5 引入）。
+- **跨协议桥接 / 上下文虚拟化**（L3.5）：M0+M1 只做同态透传（客户端协议 = 上游协议），不做跨协议桥（Responses->Chat Completions 等）。`previous_response_id` / `previous_interaction_id` 原样转发，PingoGate 不查历史、不 materialize。跨协议桥需 Go 上下文桥（ConversationTimeline + ContextMaterializer），后置 L3.5。
+- **marketplace schema 转换规则配置**（L6）：M0+M1 转换规则硬编码（仅 OpenAI `include_usage` 注入），不做 marketplace 可视化 schema 匹配（Go+React），后置 L6。
+- **嵌入式控制台**（L6）：M0+M1 仅机器可读 API，无 React 控制台，后置 L6。
+- **多协议桥 / Realtime / Live / 文件媒体 / Batch Jobs**（远期，蓝图 10/12/13/14）：后置，架构仅留能力族位置（宪法 XI）。
+- **网关基础设施高级项**（L3+）：M0+M1 仅上游 TLS 默认校验 + 基础重试；HTTPS 终止证书管理 / ACME 自动化 / mTLS / CORS / IP allow-deny / 熔断 / 健康检查 / region-aware 路由等后置。
+
 
 ### 1.4 数据面复用 001
 
