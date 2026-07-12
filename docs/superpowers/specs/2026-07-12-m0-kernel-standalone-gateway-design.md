@@ -18,7 +18,8 @@ M0 是内核的**最小可用形态**；平台模式（gRPC 推送 + 虚拟 key 
 
 - `core-rs/` Cargo workspace 搭建，按宪法 IV 重组 crate（`core` / `storage` / `pipeline` / `router` / `transform` / `provider` / `listener` / `snapshot` / `pingogate-core`）。
 - Pingora 数据面管线：协议识别 -> 网关 Key 鉴权 -> 模型路由 -> 上游认证注入 -> 透传（含 SSE 零拷贝）-> 错误镜像 -> 可观测。
-- 三协议原生透传：OpenAI Chat Completions / Anthropic Messages / Gemini generateContent，含 SSE。
+- **六接口同态透传**：OpenAI Chat Completions（`{ver}/chat/completions`）/ OpenAI Responses（`{ver}/responses`）/ Gemini generateContent（`{ver}/models/{m}:generateContent`）/ Gemini streamGenerateContent（`{ver}/models/{m}:streamGenerateContent`）/ Gemini Interactions（`interactions.create`）/ Anthropic Messages（`{ver}/messages`），含 SSE。**同态透传**：客户端协议与上游协议相同，网关原样转发，`previous_response_id` / `previous_interaction_id` 原样转发不处理（上游服务端自管状态），PingoGate 不存任何会话状态。
+- **协议识别按路径结构后缀匹配，不硬编码版本前缀**（版本前缀 `{ver}` provider 特定且可变，见 `docs/02-provider-schemas.md` §0 关键点 4）：识别 `/chat/completions` / `/responses` / `:generateContent` / `:streamGenerateContent` / `interactions` / `/messages` 等后缀模式，版本前缀通配。
 - 单机模式配置源：`pingogate-core.yaml` 文件（监听器 / Provider / 路由 / 静态网关 Key）。
 - 静态网关 Key 鉴权：一组具名 Key（`env:` 引用），客户端持网关 Key，上游 Provider Key 由网关注入、永不下发客户端。
 - Provider Key 经密钥引用（`env:VAR`）解析，**不加密**（单机单用户无隔离需求），KeyVault 不启用。
@@ -32,9 +33,9 @@ M0 是内核的**最小可用形态**；平台模式（gRPC 推送 + 虚拟 key 
 - **KeyVault 加密**（L1，平台模式）：M0 provider key 用 `env:` 明文引用，不加密。
 - **虚拟 Key**（L2，平台模式）：M0 用静态网关 Key，不支持 scoped / 撤销 / Go 推送。
 - **Go 非内核**（L0-L2 控制面）：M0 无 Go、无 DB、无 OAuth / RBAC / 多用户。
-- **用量计量**（L5）：M0 不计 token、不落用量表（用量计量引擎在 L5 引入，M0 热路径不解析 SSE 取 usage）。
-- **转换引擎实际规则**（L3+）：M0 只透传不改 body；`transform` crate 留 trait 与空实现，不为 M0 做任何请求 / 响应改写（含 OpenAI `include_usage` 注入）。
-- **多协议桥 / 上下文虚拟化**（蓝图 10/11）：远期。
+- **用量计量落库**（L5）：M0 单机模式无 Go/无 DB，不落用量表。但 M0 **Rust 提取现成 usage**（provider 响应中的 usage 字段，见 `docs/02-provider-schemas.md` §0）记到 log / Prometheus 指标（尽力而为；无 usage 的请求不估算，M0 不带 tokenizer）。
+- **转换引擎实际规则**（L3+）：M0 只透传不改 body；`transform` crate 留 trait 与空实现，不为 M0 做任何请求 / 响应改写。**例外**：OpenAI Chat Completions 流式需注入 `stream_options.include_usage:true` 才能提取 usage--M0 是否注入此参数见 R5（未决）。
+- **跨协议桥接 / 上下文虚拟化**（L3.5 + Go）：M0 只做**同态透传**（客户端协议 = 上游协议），不做跨协议桥（如 Responses->Chat Completions）。跨协议桥需 Go 上下文桥（ConversationTimeline + ContextMaterializer），M0 无 Go。`previous_response_id` / `previous_interaction_id` 在 M0 同态透传中原样转发，不查历史、不 materialize。
 - **嵌入式控制台**（L6）：M0 仅机器可读 Admin API。
 
 ### 1.4 数据面复用 001
@@ -110,7 +111,13 @@ M0 不建平台模式的空壳实现，只留 trait 位置（宪法 II YAGNI）�
 ```text
 1. Pingora 接收请求，new_ctx() 加载当前 RuntimeSnapshot（ArcSwap::load）
 2. request_filter():
-   a. 协议识别（protocol::detect）：按 method+path 识别 OpenAI/Anthropic/Gemini
+   a. 协议识别（protocol::detect）：按路径结构后缀识别六接口（不硬编码版本前缀，`{ver}` 通配）：
+      - `{ver}/chat/completions` -> OpenAI Chat Completions
+      - `{ver}/responses` -> OpenAI Responses（有状态，同态透传 `previous_response_id` 原样转发）
+      - `{ver}/models/{m}:generateContent` -> Gemini generateContent（非流式）
+      - `{ver}/models/{m}:streamGenerateContent` -> Gemini streamGenerateContent（流式，`streaming_by_path=true`）
+      - `interactions.create` -> Gemini Interactions（有状态，同态透传 `previous_interaction_id` 原样转发）
+      - `{ver}/messages` -> Anthropic Messages
       - 识别失败 -> PingoGate 原生错误（FR-036）
       - 不支持能力族 -> 镜像该 Provider 错误（FR-007）
    b. 网关 Key 鉴权（StaticKeyAuth）：从 Authorization/x-api-key 提取，查 snapshot.gateway_keys
@@ -118,6 +125,7 @@ M0 不建平台模式的空壳实现，只留 trait 位置（宪法 II YAGNI）�
    c. 模型路由（router::extract_model + snapshot.route）：从 body(model) 或 path(gemini) 提取别名 -> 解析 provider+upstream_model
       - 无匹配路由 -> 镜像目标 Provider 错误（FR-016）
    d. 记 CTX：protocol / route / streaming 标记
+   e. **同态透传**：Responses/Interactions 的 `previous_response_id`/`previous_interaction_id` 不处理，原样转发（M0 不查历史、不 materialize；跨协议桥是 L3.5）
 3. upstream_peer(): 构造 HttpPeer（含上游 TLS，默认校验）
 4. upstream_request_filter():
    a. 剥离网关 Key 头（authorization / x-api-key）
@@ -258,14 +266,14 @@ pub trait KeyAuth: Send + Sync {
 
 契约 / 集成 / 单元测试先行。
 
-- **单元**：协议识别（三协议 + 不支持能力 + 未识别）；上游认证注入（三方式）；模型别名提取；snapshot 构建与校验；KeyAuth；authorize 边界；密钥脱敏。
-- **集成**：管线阶段往返；三协议透传（非流式 + SSE）；热重载（成功切换 / 失败不改活跃 / 在途请求零中断）；密钥引用缺失启动失败。
-- **契约**：Admin API（六端点 + 鉴权边界）；`pingogate-core.yaml` schema；三协议透传 + 镜像错误。
+- **单元**：协议识别（六接口 + 不支持能力 + 未识别 + 版本前缀通配）；上游认证注入（三方式）；模型别名提取；snapshot 构建与校验；KeyAuth；authorize 边界；密钥脱敏；usage 提取（各接口 usage 位置）。
+- **集成**：管线阶段往返；六接口同态透传（非流式 + SSE，含 Responses/Interactions 的 previous_id 原样转发）；热重载（成功切换 / 失败不改活跃 / 在途请求零中断）；密钥引用缺失启动失败。
+- **契约**：Admin API（六端点 + 鉴权边界）；`pingogate-core.yaml` schema；六接口透传 + 镜像错误。
 - **基准**：无状态透传延迟基准（默认 `#[ignore]`，显式运行），回归阻止合入。
 
 ## 12. 成功标准（Success Criteria）
 
-- **SC-1**：客户端仅改 base URL / token / 模型名，三协议（含 SSE）经网关调通上游，响应与直连一致。
+- **SC-1**：客户端仅改 base URL / token / 模型名，六接口（OpenAI Chat Completions + Responses / Gemini generateContent + streamGenerateContent + Interactions / Anthropic Messages，含 SSE）经网关同态透传调通上游，响应与直连一致；Responses/Interactions 的 `previous_response_id`/`previous_interaction_id` 原样转发，多轮续接正常（上游服务端自管状态）。
 - **SC-2**：网关 Key 无效 / 缺失在鉴权阶段被拒，不触达上游。
 - **SC-3**：上游 Provider Key 不下发客户端、不进日志 / 指标。
 - **SC-4**：热重载成功切换；非法配置被拒且活跃 snapshot 100% 继续服务；在途请求零中断。
@@ -274,6 +282,8 @@ pub trait KeyAuth: Send + Sync {
 - **SC-7**：不支持的能力族返回显式「不支持」错误，不畸形透传。
 - **SC-8**：单二进制启动服务全部能力，无外部 DB / 协调服务。
 - **SC-9**：`SnapshotSource` / `KeyAuth` trait 存在，`FileSnapshotSource` / `StaticKeyAuth` 实现，平台模式实现位置预留（编译通过，不实现）。
+- **SC-10**：Rust 提取 provider 响应现成 usage（各接口 usage 位置正确，见 `docs/02-provider-schemas.md` §0），记 log / Prometheus 指标；无 usage 请求不估算（M0 不带 tokenizer）。
+- **SC-11**：协议识别按路径结构后缀匹配，版本前缀 `{ver}` 通配（改 provider 版本前缀不需改代码，001 的精确路径匹配坑已修）。
 
 ## 13. 风险与未决
 
@@ -281,3 +291,6 @@ pub trait KeyAuth: Send + Sync {
 - **R2 未决**：`router` 是否 M0 独立 crate，还是暂留 pipeline 内？倾向独立（为平台模式路由策略扩展），但增加一个 crate 的开销。plan 阶段定。
 - **R3 风险**：001 移植时 Pingora 版本可能需升级（001 用 pingora-proxy 0.8.0），升级 API 变更风险。实现期用 context7 核对当前版本（宪法 XVII）。
 - **R4 风险**：crate 重组后 001 的测试需重新组织，可能暴露隐藏耦合。移植时逐 crate 验证。
+- **R5 未决**：OpenAI Chat Completions 流式需注入 `stream_options.include_usage:true` 才能提取 usage。M0 是否注入？注入则违"只透传不改 body"（需用 transform 引擎，M0 本想空实现）；不注入则 OpenAI Chat Completions 流式无 usage。倾向**注入**（usage 提取价值 > 严格透传，且 transform trait 本就要建），plan 阶段定。
+- **R6 风险**：001 协议识别用精确路径匹配（`path == "/v1/chat/completions"`），硬编码版本前缀。M0 必须改为路径结构后缀匹配（版本前缀通配），这是 001 移植的必要改造（非简单复用）。
+- **R7 风险**：Gemini Interactions 完整 body schema 不全（overview 页未给完整字段，见 `docs/02-provider-schemas.md` §8 待补充）。M0 实现期需用 context7 / WebFetch 核对 `interactions.create` 完整 schema 与流式机制，可能发现与文档不符。
