@@ -10,11 +10,11 @@ PingoGate 采用**内核 Rust + 非内核 Go** 双语言架构，双二进制：
 
 - **Rust 内核**（`pingogate-core` 二进制）：**无状态**请求处理核心引擎 + 安全核心 + 用量提取。性能 / 正确性敏感、稳定少变、不可替代。包括：Pingora 数据面管线（协议识别 / 鉴权 / 请求路由 / 请求转换 / 上游认证注入 / 响应转换 / SSE 零拷贝透传 / 错误镜像）、路由引擎（别名 / 权重 / fallback / 健康检查）、转换引擎（无状态 body 改写 / 协议桥，不含 materialize）、KeyVault（密钥加解密，安全核心）、快照引擎（RuntimeSnapshot + ArcSwap，内存）、**用量提取（只提取 provider 响应中现成的 usage 字段，不做估算、不带 tokenizer）**。**Rust 内核零 DB、零持久状态、不带 tokenizer**。
 - **Go 非内核**（`pingogate-ctrl` 二进制）：**所有状态** + 业务面 + 平台治理。迭代频繁、生态依赖。包括：控制面 API（用户 / 组织 / RBAC / 虚拟 key CRUD）、OAuth / 会话、**上下文桥（ConversationTimeline 存储 + ContextMaterializer，处理带 previous_response_id / previous_interaction_id 的有状态请求）**、**用量估算（无 usage 时用 tokenizer 估算；失败 / 中断部分计量）+ 用量聚合 / 落库 / 查询 / 计费 / 配额 / 限流规则**、审计、控制台后端 BFF、管理面（健康 / 就绪 / reload 编排）、DB。
-- **通信**：Go 非内核经 gRPC 把「配置 / 密钥 / 虚拟 key / 计费规则」作为快照推给 Rust 内核；Rust 内核 KeyVault 解密后存内存快照，热路径零 DB 零解密。Rust 提取现成 usage 数字推 Go；无 usage 时 Rust 推 body 给 Go 估算（复用上下文 materialize 的 body 或专门推）。带上下文请求由 Go materialize 后推给 Rust 透传。**Rust 内核零 DB 访问、不带 tokenizer**。跨语言类型经 protobuf codegen 同步。
+- **通信**：Go 非内核经 gRPC 把「配置 / 密钥 / 虚拟 key / 计费规则」作为快照推给 Rust 内核；**快照存密文，热路径每请求 KeyVault 解密一次（AES-GCM ~0.2µs，占延迟预算 0.001% 可忽略），明文仅在 `KeyVault::decrypt()` 返回的 `SecretString` 中存活（请求结束清零），不缓存、不常驻**。Rust 提取现成 usage 数字推 Go；无 usage 时 Rust 推 body 给 Go 估算（复用上下文 materialize 的 body 或专门推）。带上下文请求由 Go materialize 后推给 Rust 透传。**Rust 内核零 DB 访问、不带 tokenizer**。跨语言类型经 protobuf codegen 同步。
 - **部署**：双二进制，可打包进单个 Docker 镜像。单仓库（`proto/` / `core-rs/` / `ctrl-go/` / `console/` / `deploy/` / `docs/` / `.claude/` 共存），因 proto 为 Rust / Go 共享根，跨语言原子提交。
 - **双运行模式**：Rust 内核支持两种部署形态，同一二进制渐进增强：
   - **单机模式（standalone）**：内核单独运行，从 `pingogate-core.yaml` 文件加载路由 / 上游 / 静态网关 key，provider key 用密钥引用（`env:VAR`，不加密，单用户无隔离需求），无 Go、无 DB。一个可用的轻量 LLM 网关（对标蓝图 3.1 单二进制优先）。KeyVault 不启用。
-  - **平台模式（platform）**：内核 + Go 非内核。Go 经 gRPC 推快照（含虚拟 key / 加密 provider key / 计费规则），KeyVault 解密后存内存快照，多用户 BYOK 隔离 + 用量计量 + 计费。完整 SaaS 平台。
+  - **平台模式（platform）**：内核 + Go 非内核。Go 经 gRPC 推快照（含虚拟 key / **密文** provider key / 计费规则），快照存密文，热路径每请求 KeyVault 解密一次（~0.2µs 可忽略），明文仅 SecretString 存活不缓存，多用户 BYOK 隔离 + 用量计量 + 计费。完整 SaaS 平台。
   - 单机模式是内核最小可用形态；平台模式是增强。两种模式共享同一数据面管线 / 路由引擎 / 转换引擎，仅快照来源与鉴权模式不同。
 
 **分界原则**：**Rust 内核 = 无状态计算**（请求处理链路：透传 / 路由 / 无状态转换 / 安全 / 采集；零 DB 零持久状态）；**Go 非内核 = 所有状态**（配置 / 用户 / 上下文 ConversationTimeline / 用量落库 / 计费 / 审计；管 DB）。例外：单机模式（见下）Rust 从文件加载快照，仍无 DB。

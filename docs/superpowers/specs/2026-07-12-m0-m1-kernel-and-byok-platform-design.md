@@ -152,8 +152,9 @@ M0+M1 同态透传不区分有无 previous_id，都直入 Rust 原样转发（�
 ### 3.3 跨语言（`proto/`）
 
 gRPC 接口定义（内部通信安全见 §12A：mTLS + 内部 token + 仅 127.0.0.1）：
-- `SnapshotService.PushSnapshot`（Go -> Rust，stream）：推 RuntimeSnapshot（providers/routes/virtual_keys 哈希/加密 provider key），带 version，Rust 回 ack（见 §12C 同步语义）。
-- `KeyVaultService.Encrypt` / `Decrypt`（Go -> Rust，unary）：加解密 provider key。Decrypt 请求含 `requester_user_id` + `key_id`，Go 校验 created_by 后调用，Rust 记审计日志（双层防御，见 §12A）。
+- `SnapshotService.PushSnapshot`（Go -> Rust，stream）：推 RuntimeSnapshot（providers/routes/virtual_keys 哈希/加密 provider key + owner_user_id 映射），带 version，Rust 回 ack（见 §12C 同步语义）。**全量推送**（增量触发条件见 §12C）。
+- `SnapshotService.PushDelta`（Go -> Rust，stream，**预留位置不实现**）：未来增量推送 `{from_version, to_version, added[], modified[], removed[]}`，满足 §12C 触发条件时启用。
+- `KeyVaultService.Encrypt` / `Decrypt`（Go -> Rust，unary）：加解密 provider key。Decrypt 请求含 `requester_user_id` + `key_id` + `intent`（view_plaintext / hot_path_inject），Rust 双防线校验（见 §12A）。
 - `UsageService.ReportUsage`（Rust -> Go，stream）：Rust 推 usage 事件（数字或 body）。
 - `HealthService`（双向，unary）：心跳 + Rust 报告当前快照 version，Go 据此判断是否需重推全量（见 §12C 恢复）。
 
@@ -180,7 +181,7 @@ gRPC 接口定义（内部通信安全见 §12A：mTLS + 内部 token + 仅 127.
    c. 注入上游认证（Bearer/x-api-key/query_key，按 provider）
    d. transform: OpenAI Chat Completions 流式注入 include_usage（若配置）
 5. Pingora 透传：响应头透传；body 逐 Bytes 块零拷贝（SSE 不缓冲）
-6. usage 提取（旁路 observer）：解析 SSE 末块 usage（各接口位置不同）-> 推 Go
+6. usage 提取（inline 事件驱动解析，见 §12D）：`upstream_response_body_filter` 内，ctx 挂小 `LineBuffer`（跨 chunk 重组 `data:` 行，O(1) 几 KB）；每 chunk 廉价字节扫描找 usage 标记（`"usage"`/`usageMetadata`/`response.completed`/`message_delta`/`message_start`），命中时只 JSON 解析那一行（几十字节）；按 provider 归约（OpenAI 末块/Responses completed/Anthropic message_start+message_delta/Gemini 末块 usageMetadata）；`end_of_stream` 推 Go。**零拷贝不破**（bytes::Bytes 引用计数，filter 读后原样放行）、O(1) 内存、p50 额外 <0.1ms。不缓冲整流（区别于 LiteLLM/one-api 全量缓冲）。旁路 observer（body.clone() 丢独立 task）留作后置能力，M0+M1 不用--usage-only 提取无重活可搬，inline 更简单更低延迟；observer 留给未来 body materialize（L3.5 跨协议桥 / 无 usage tokenizer 估算）。
 7. 错误路径：上游超时/不可用 -> 镜像 Provider 错误；上游自身错误原样透传
 8. 可观测：trace id/protocol/route/status/latency；metrics 计数
 ```
@@ -195,14 +196,18 @@ gRPC 接口定义（内部通信安全见 §12A：mTLS + 内部 token + 仅 127.
   -> Go 构建新快照（含密文 key）-> gRPC 推 Rust
 ```
 
-### 4.3 BYOK key 查看明文流程（1Password 可见性）
+### 4.3 BYOK key 查看明文流程（1Password 可见性，双防线）
 
 ```text
 created_by 用户 -> Go API（请求看明文）
-  -> Go 校验 created_by == 请求者（1Password 规则，Go 决定"谁能看"）
-  -> Go 调 Rust KeyVault.Decrypt(密文) -> 明文
+  -> L1 Go 校验 created_by == 请求者（DB 最新数据，第一道拦截）
+  -> Go 调 Rust KeyVault.Decrypt(密文, requester_user_id, key_id, intent=view_plaintext)
+  -> L2 Rust 校验 requester_user_id == snapshot.owner(key_id)（独立信任域，第二道拦截，不符拒绝）
+  -> L3 Rust 记审计日志（who decrypted whose key）
+  -> Rust 解密返回明文 SecretString
   -> Go 返回明文给用户（一次性，不持久化）
-非 created_by 用户 -> Go 只返回末位 + 元数据，不调解密
+非 created_by 用户 -> Go L1 即拒绝，只返回末位 + 元数据，不调 Rust
+（即使 Go 被绕过直调 Rust，Rust L2 仍拦截：requester != owner 拒绝解密）
 ```
 
 ### 4.4 热重载
@@ -343,7 +348,11 @@ Rust 内核与 Go 非内核间的 gRPC（快照推送 / KeyVault 加解密 / usa
 
 - **传输**：本地 127.0.0.1 监听；默认 mTLS（Rust 与 Go 互验证书），单机模式无 gRPC 不涉及。开发环境可降级为明文（显式 `grpc.tls: false`，仅本地）。
 - **鉴权**：gRPC 元数据携带共享内部 token（`env:PINGO_INTERNAL_TOKEN`，启动时 Rust/Go 各自加载）；Rust 校验调用方 token，拒绝无 token / 错 token 的调用。
-- **KeyVault.Decrypt 专门约束**：即使 gRPC 鉴权通过，Rust 侧不单独信任 Go 的 created_by 校验--Rust 在 Decrypt 请求里要求 Go 传 `requester_user_id` + `key_id`，Rust 记审计日志（谁解密了谁的 key）。Go 侧 created_by 校验是第一道，Rust 审计是第二道（事后追责），双层防御。
+- **KeyVault.Decrypt 双防线（独立拦截，非仅审计）**：Rust 不单独信任 Go 的 created_by 校验。Go 推快照时 `UserProviderKey` 密文条目附带 `owner_user_id`（快照内自然可得），Rust 持 `key_id -> owner_user_id` 映射（内存，随快照 ArcSwap 切换，不读 DB）。Decrypt 请求含 `requester_user_id` + `key_id` + `intent`：
+  - `intent=view_plaintext`（用户看明文）：Rust 校验 `requester_user_id == snapshot.owner(key_id)`，不符即**拒绝**（拦截，非仅审计）。这是 1Password 可见性核心场景，双防线生效。
+  - `intent=hot_path_inject`（热路径注入）：Rust 校验调用方是已鉴权管线（mTLS + internal token），virtual key owner == provider key owner 已在管线鉴权阶段做。
+  - Rust 始终记审计日志（who decrypted whose key），作第三道事后追责。
+- **三层纵深防御**（对齐 1Password server-enforced + AWS KMS）：L1 Go 应用层 `created_by==requester`（细粒度，DB 最新）-> L2 Rust KeyVault `requester==snapshot.owner`（粗粒度独立信任域拦截）-> L3 审计 -> L4 密码学（AES-GCM + MKEK 不出 Rust）。Rust 校验是粗粒度相等性判定，不懂 User/RBAC/角色，不破坏"无状态/无业务/零 DB"（业界范式：AWS KMS 不懂 secret owner 只懂 key 使用权；1Password server 不懂 item created_by 只懂 vault membership）。HashiCorp Vault 的"barrier 不重复校验"不适用，因 Vault 单进程单信任域，PingoGate 跨进程双信任域。
 - **不暴露公网**：gRPC listener 仅 bind 127.0.0.1，不对外。
 
 ## 12B. Bootstrap 流程
@@ -367,6 +376,9 @@ Rust 内核与 Go 非内核间的 gRPC（快照推送 / KeyVault 加解密 / usa
 - **Go 崩溃恢复**：Go 重启 -> 读 DB -> 重建内存状态 -> 向 Rust 推当前全量快照。Rust 用旧快照继续服务（Go 崩溃期间 Rust 热路径不中断，因快照在 Rust 内存）。
 - **并发推送串行化**：Go 侧 snapshot 推送经 mutex 串行（同一时刻一个推送），避免乱序；Rust 侧 ArcSwap 原子切换保证一致性。
 - **最终一致**：短暂不一致可接受（Go DB 已改、Rust 未同步期间，Rust 用旧快照服务）。权威是 DB，对账后修正。
+- **全量性能（调研实测）**：1 万 virtual key 全量推送约 4-15ms（protobuf 序列化 2-5ms + 本地 gRPC 传输 <1ms + Rust 反序列化 1-3ms + DB 查询构建 5-15ms），**不在热路径**（Rust 热路径 ArcSwap 无锁读旧快照，Go 异步构建不阻塞管理 API）。p95 < 20ms 预算零影响。Kong 3.9.x / Envoy SOTW 都全量起步，验证可行。
+- **转增量触发条件（任一满足，启动 PushDelta 设计，见 §3.3 预留）**：virtual key > 5 万 / 推送频率 > 10 次/秒持续 / Go 构建推送 p95 > 50ms / payload > 5MB / 多 Rust 内核实例（fan-out > 1）。仿 Delta xDS：`PushDelta{from_version, to_version, added[], modified[], removed[]}` + Go per-key 版本追踪 + Rust diff apply + 重连协商（Rust 回传 initial_resource_versions）。M0+M1 不实现，只预留 proto 位置（宪法 II）。
+- **全量阶段须做对的（已覆盖）**：version 单调递增且持久化；ack 含 version；Go mutex 串行推送；Rust readyz 首个全量前 not-ready；proto 消息 `repeated VirtualKey` 可扩展。
 
 ## 12D. 测试策略（宪法 XIII）
 
@@ -395,9 +407,9 @@ Rust 内核与 Go 非内核间的 gRPC（快照推送 / KeyVault 加解密 / usa
 - **R3 风险**：001 移植时 Pingora 版本可能需升级（001 用 pingora-proxy 0.8.0），API 变更风险。S1 实现期用 context7 核对（宪法 XVII）。
 - **R4 风险**：crate 重组后 001 测试需重新组织，可能暴露隐藏耦合。S1 移植时逐 crate 验证。
 - **R5 未决**：OpenAI Chat Completions 流式 `include_usage` 注入是否 S3 实现？倾向是（否则该接口流式无 usage）。S3 plan 定。
-- **R6 风险**：KeyVault 热路径解密性能--平台模式每请求解密 provider key 是否缓存？倾向 S3 先不缓存（正确性优先），性能优化后置。
-- **R7 风险**：gRPC 快照推送一致性--Go 推送中途 Rust 用旧快照，需保证最终一致 + 版本号。S2 设计。
-- **R8 未决**：Gemini Interactions 完整 schema（`docs/02-provider-schemas.md` §8 待补充），S1 协议识别可能需实现期核对 API ref。
+- **R6 已解决（调研）**：KeyVault 热路径解密不缓存，每请求解密。AES-GCM 实测 ~0.2µs（占 p95 20ms 预算 0.001% 可忽略）；LiteLLM 对 DB 加密 key 同样每请求解密无缓存；Vault Agent/AWS SM 的 TTL cache 是为减少远程 API 调用（1-10ms 网络），PingoGate 密文已在内存无远程调用，cache 无收益。选 A：快照存密文，每请求 KeyVault::decrypt -> SecretString 存 CTX，请求结束清零。宪法"零解密"表述已据此修正。
+- **R7 已解决（见 §12C）**：gRPC 快照推送全量 + version + ack + 串行化，恢复语义明确。全量 1 万 key 4-15ms 不在热路径；转增量触发条件已定（5 万 key / 10 次/秒 / p95>50ms / 5MB / 多实例）。
+- **R8 部分解决（调研）**：协议识别用路径模板 + 版本前缀可选段（LiteLLM 双重注册思路：`/v1beta/models/{m}:generateContent` 与 `/models/{m}:generateContent` 都识别），Gemini `:generateContent` / `:streamGenerateContent` / Interactions 分别独立路由。Gemini Interactions 精确 REST 端点 S1 实现期核对 API ref（`docs/02-provider-schemas.md` §8 待补）。
 - **R9 未决**：DB 迁移工具选型（sqlx migrate vs golang-migrate vs 手写）？倾向 sqlx migrate（与 sqlx 一体），S2 plan 定。
 - **R10 未决**：gRPC 内部 mTLS 证书怎么签发（自签 CA？启动时生成？）？倾向首次启动 Go 生成自签 CA + Rust/Go 各证书，S1 plan 定。
 - **R11 风险**：Rust 首次全量同步前 not-ready，若 Go 启动慢则 Rust 长时间拒流量；需 readiness 探针编排（K8s 部署时）。S3 部署配置考虑。
