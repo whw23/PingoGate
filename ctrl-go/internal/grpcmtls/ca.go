@@ -160,7 +160,8 @@ func generateAndWriteLeaf(dir, certName, keyName, cn string, caCert []byte, caKe
 	return writeKey(filepath.Join(dir, keyName), key)
 }
 
-// writeCert encodes a DER cert as PEM and writes it to path (0600).
+// writeCert encodes a DER cert as PEM and writes it to path (0644: certs are
+// public, world-readable is fine).
 func writeCert(path string, certDER []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
