@@ -1,5 +1,13 @@
 # core-rs/snapshot/Cargo.toml
 [package]
 name = "pingogate-snapshot"
+description = "pingogate.yaml schema, semantic validation, and immutable RuntimeSnapshot."
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+pingogate-core-types = { path = "../core" }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+arc-swap = { workspace = true }
+thiserror = { workspace = true }

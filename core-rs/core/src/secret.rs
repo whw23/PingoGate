@@ -1,8 +1,14 @@
-//! A secret string that never reveals its contents through `Debug`/`Display`.
+//! Secret material + secret-reference resolution (constitution XX).
 //!
-//! Resolved provider keys and gateway-key secrets are wrapped here so that an
-//! accidental `{:?}` or `{}` in a log line cannot leak plaintext (constitution
-//! XX). Access the plaintext only through [`SecretString::expose`].
+//! [`SecretString`] wraps resolved provider keys and gateway-key secrets so an
+//! accidental `{:?}`/`{}` in a log line cannot leak plaintext. [`SecretResolver`]
+//! abstracts how an opaque reference (e.g. `env:VAR`) becomes material at
+//! snapshot-build time.
+//!
+//! Both live in the cycle-breaker `core` crate (constitution VIII): the
+//! `pingogate-snapshot` crate needs `SecretResolver` for `RuntimeSnapshot::build`
+//! and the `pingogate-storage` crate needs it for `EnvSecretResolver`/`FileSnapshotSource`;
+//! keeping the trait here avoids a snapshot <-> storage dependency cycle.
 
 use std::fmt;
 
@@ -40,6 +46,28 @@ impl From<String> for SecretString {
     fn from(value: String) -> Self {
         Self(value)
     }
+}
+
+/// Errors raised while resolving an opaque secret reference to material.
+#[derive(Debug, thiserror::Error)]
+pub enum SecretError {
+    #[error("secret reference is empty")]
+    Empty,
+    #[error("unsupported secret reference scheme: {0}")]
+    UnsupportedScheme(String),
+    #[error("environment variable not set: {0}")]
+    MissingEnv(String),
+    #[error("resolved secret is empty: {0}")]
+    EmptyValue(String),
+}
+
+/// Resolves an opaque secret reference (e.g. `env:OPENAI_API_KEY`) to material.
+///
+/// Implementations live in `pingogate-storage` (`EnvSecretResolver`); the trait
+/// stays here so both `pingogate-snapshot` and `pingogate-storage` can name it
+/// without a cyclic dependency.
+pub trait SecretResolver: Send + Sync {
+    fn resolve(&self, reference: &str) -> Result<SecretString, SecretError>;
 }
 
 #[cfg(test)]

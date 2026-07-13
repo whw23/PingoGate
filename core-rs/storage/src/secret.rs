@@ -1,27 +1,16 @@
-//! Secret-reference resolution.
+//! Secret-reference resolution: `EnvSecretResolver` impl.
+//!
+//! The [`SecretResolver`] trait and [`SecretError`] live in `pingogate-core-types`
+//! (the cycle-breaker crate, constitution VIII) so that `pingogate-snapshot` can
+//! name the trait without depending on `pingogate-storage`. This module ships the
+//! environment-variable-backed implementation and re-exports the trait/error for
+//! callers that historically imported them from `pingogate-storage`.
 //!
 //! This phase supports only `env:VAR_NAME` references (config contract). The
 //! resolver reads the environment at snapshot-build time and returns a
 //! [`SecretString`]; error messages name the variable, never its value.
 
-use pingogate_core_types::SecretString;
-
-#[derive(Debug, thiserror::Error)]
-pub enum SecretError {
-    #[error("secret reference is empty")]
-    Empty,
-    #[error("unsupported secret reference scheme: {0}")]
-    UnsupportedScheme(String),
-    #[error("environment variable not set: {0}")]
-    MissingEnv(String),
-    #[error("resolved secret is empty: {0}")]
-    EmptyValue(String),
-}
-
-/// Resolves an opaque secret reference (e.g. `env:OPENAI_API_KEY`) to material.
-pub trait SecretResolver: Send + Sync {
-    fn resolve(&self, reference: &str) -> Result<SecretString, SecretError>;
-}
+pub use pingogate_core_types::{SecretError, SecretResolver, SecretString};
 
 /// Resolver backed by process environment variables.
 #[derive(Debug, Default, Clone)]

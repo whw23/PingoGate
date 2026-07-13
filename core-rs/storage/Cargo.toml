@@ -7,4 +7,5 @@ edition.workspace = true
 
 [dependencies]
 pingogate-core-types = { path = "../core" }
+pingogate-snapshot = { path = "../snapshot" }
 thiserror = { workspace = true }
