@@ -32,7 +32,38 @@ service HealthService {
 
 message Snapshot {
   uint64 version = 1;
-  bytes payload = 2;  // S1 占位;S2 扩展
+  repeated ProviderEntry providers = 2;
+  repeated RouteEntry routes = 3;
+  repeated VirtualKeyEntry virtual_keys = 4;  // S3 填充,S2 留空
+  repeated EncryptedProviderKey encrypted_keys = 5;
+}
+
+message ProviderEntry {
+  string name = 1;
+  string kind = 2;            // openai-compatible / anthropic / gemini
+  string base_url = 3;
+  string auth_method = 4;     // bearer / api_key_header / query_key
+  string encrypted_key_ref = 5;  // 引用 encrypted_keys 中的 id
+  string anthropic_version = 6;
+  repeated string capability_families = 7;
+}
+
+message RouteEntry {
+  string alias = 1;
+  string provider = 2;
+  string upstream_model = 3;
+}
+
+message EncryptedProviderKey {
+  string id = 1;
+  bytes ciphertext = 2;
+  string owner_user_id = 3;  // S3 双防线用
+  string created_by = 4;
+}
+
+message VirtualKeyEntry {
+  // S3 填充,S2 留空消息
+  string id = 1;
 }
 
 message Ack {

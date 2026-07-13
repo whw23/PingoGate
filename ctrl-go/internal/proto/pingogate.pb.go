@@ -24,9 +24,12 @@ const (
 )
 
 type Snapshot struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Version       uint64                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"` // S1 占位;S2 扩展
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Version       uint64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Providers     []*ProviderEntry        `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"`
+	Routes        []*RouteEntry           `protobuf:"bytes,3,rep,name=routes,proto3" json:"routes,omitempty"`
+	VirtualKeys   []*VirtualKeyEntry      `protobuf:"bytes,4,rep,name=virtual_keys,json=virtualKeys,proto3" json:"virtual_keys,omitempty"` // S3 填充,S2 留空
+	EncryptedKeys []*EncryptedProviderKey `protobuf:"bytes,5,rep,name=encrypted_keys,json=encryptedKeys,proto3" json:"encrypted_keys,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -68,11 +71,297 @@ func (x *Snapshot) GetVersion() uint64 {
 	return 0
 }
 
-func (x *Snapshot) GetPayload() []byte {
+func (x *Snapshot) GetProviders() []*ProviderEntry {
 	if x != nil {
-		return x.Payload
+		return x.Providers
 	}
 	return nil
+}
+
+func (x *Snapshot) GetRoutes() []*RouteEntry {
+	if x != nil {
+		return x.Routes
+	}
+	return nil
+}
+
+func (x *Snapshot) GetVirtualKeys() []*VirtualKeyEntry {
+	if x != nil {
+		return x.VirtualKeys
+	}
+	return nil
+}
+
+func (x *Snapshot) GetEncryptedKeys() []*EncryptedProviderKey {
+	if x != nil {
+		return x.EncryptedKeys
+	}
+	return nil
+}
+
+type ProviderEntry struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Kind               string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"` // openai-compatible / anthropic / gemini
+	BaseUrl            string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	AuthMethod         string                 `protobuf:"bytes,4,opt,name=auth_method,json=authMethod,proto3" json:"auth_method,omitempty"`                  // bearer / api_key_header / query_key
+	EncryptedKeyRef    string                 `protobuf:"bytes,5,opt,name=encrypted_key_ref,json=encryptedKeyRef,proto3" json:"encrypted_key_ref,omitempty"` // 引用 encrypted_keys 中的 id
+	AnthropicVersion   string                 `protobuf:"bytes,6,opt,name=anthropic_version,json=anthropicVersion,proto3" json:"anthropic_version,omitempty"`
+	CapabilityFamilies []string               `protobuf:"bytes,7,rep,name=capability_families,json=capabilityFamilies,proto3" json:"capability_families,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ProviderEntry) Reset() {
+	*x = ProviderEntry{}
+	mi := &file_pingogate_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProviderEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProviderEntry) ProtoMessage() {}
+
+func (x *ProviderEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_pingogate_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProviderEntry.ProtoReflect.Descriptor instead.
+func (*ProviderEntry) Descriptor() ([]byte, []int) {
+	return file_pingogate_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ProviderEntry) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ProviderEntry) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ProviderEntry) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *ProviderEntry) GetAuthMethod() string {
+	if x != nil {
+		return x.AuthMethod
+	}
+	return ""
+}
+
+func (x *ProviderEntry) GetEncryptedKeyRef() string {
+	if x != nil {
+		return x.EncryptedKeyRef
+	}
+	return ""
+}
+
+func (x *ProviderEntry) GetAnthropicVersion() string {
+	if x != nil {
+		return x.AnthropicVersion
+	}
+	return ""
+}
+
+func (x *ProviderEntry) GetCapabilityFamilies() []string {
+	if x != nil {
+		return x.CapabilityFamilies
+	}
+	return nil
+}
+
+type RouteEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Alias         string                 `protobuf:"bytes,1,opt,name=alias,proto3" json:"alias,omitempty"`
+	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	UpstreamModel string                 `protobuf:"bytes,3,opt,name=upstream_model,json=upstreamModel,proto3" json:"upstream_model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RouteEntry) Reset() {
+	*x = RouteEntry{}
+	mi := &file_pingogate_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RouteEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RouteEntry) ProtoMessage() {}
+
+func (x *RouteEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_pingogate_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RouteEntry.ProtoReflect.Descriptor instead.
+func (*RouteEntry) Descriptor() ([]byte, []int) {
+	return file_pingogate_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RouteEntry) GetAlias() string {
+	if x != nil {
+		return x.Alias
+	}
+	return ""
+}
+
+func (x *RouteEntry) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *RouteEntry) GetUpstreamModel() string {
+	if x != nil {
+		return x.UpstreamModel
+	}
+	return ""
+}
+
+type EncryptedProviderKey struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Ciphertext    []byte                 `protobuf:"bytes,2,opt,name=ciphertext,proto3" json:"ciphertext,omitempty"`
+	OwnerUserId   string                 `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"` // S3 双防线用
+	CreatedBy     string                 `protobuf:"bytes,4,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EncryptedProviderKey) Reset() {
+	*x = EncryptedProviderKey{}
+	mi := &file_pingogate_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EncryptedProviderKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EncryptedProviderKey) ProtoMessage() {}
+
+func (x *EncryptedProviderKey) ProtoReflect() protoreflect.Message {
+	mi := &file_pingogate_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EncryptedProviderKey.ProtoReflect.Descriptor instead.
+func (*EncryptedProviderKey) Descriptor() ([]byte, []int) {
+	return file_pingogate_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *EncryptedProviderKey) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *EncryptedProviderKey) GetCiphertext() []byte {
+	if x != nil {
+		return x.Ciphertext
+	}
+	return nil
+}
+
+func (x *EncryptedProviderKey) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *EncryptedProviderKey) GetCreatedBy() string {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return ""
+}
+
+type VirtualKeyEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// S3 填充,S2 留空消息
+	Id            string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VirtualKeyEntry) Reset() {
+	*x = VirtualKeyEntry{}
+	mi := &file_pingogate_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VirtualKeyEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VirtualKeyEntry) ProtoMessage() {}
+
+func (x *VirtualKeyEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_pingogate_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VirtualKeyEntry.ProtoReflect.Descriptor instead.
+func (*VirtualKeyEntry) Descriptor() ([]byte, []int) {
+	return file_pingogate_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *VirtualKeyEntry) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 type Ack struct {
@@ -86,7 +375,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_pingogate_proto_msgTypes[1]
+	mi := &file_pingogate_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -98,7 +387,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[1]
+	mi := &file_pingogate_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -111,7 +400,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{1}
+	return file_pingogate_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Ack) GetVersion() uint64 {
@@ -146,7 +435,7 @@ type PushDeltaRequest struct {
 
 func (x *PushDeltaRequest) Reset() {
 	*x = PushDeltaRequest{}
-	mi := &file_pingogate_proto_msgTypes[2]
+	mi := &file_pingogate_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -158,7 +447,7 @@ func (x *PushDeltaRequest) String() string {
 func (*PushDeltaRequest) ProtoMessage() {}
 
 func (x *PushDeltaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[2]
+	mi := &file_pingogate_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -171,7 +460,7 @@ func (x *PushDeltaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushDeltaRequest.ProtoReflect.Descriptor instead.
 func (*PushDeltaRequest) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{2}
+	return file_pingogate_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PushDeltaRequest) GetFromVersion() uint64 {
@@ -198,7 +487,7 @@ type HeartbeatRequest struct {
 
 func (x *HeartbeatRequest) Reset() {
 	*x = HeartbeatRequest{}
-	mi := &file_pingogate_proto_msgTypes[3]
+	mi := &file_pingogate_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -210,7 +499,7 @@ func (x *HeartbeatRequest) String() string {
 func (*HeartbeatRequest) ProtoMessage() {}
 
 func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[3]
+	mi := &file_pingogate_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -223,7 +512,7 @@ func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatRequest.ProtoReflect.Descriptor instead.
 func (*HeartbeatRequest) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{3}
+	return file_pingogate_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HeartbeatRequest) GetCurrentVersion() uint64 {
@@ -249,7 +538,7 @@ type HeartbeatResponse struct {
 
 func (x *HeartbeatResponse) Reset() {
 	*x = HeartbeatResponse{}
-	mi := &file_pingogate_proto_msgTypes[4]
+	mi := &file_pingogate_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -261,7 +550,7 @@ func (x *HeartbeatResponse) String() string {
 func (*HeartbeatResponse) ProtoMessage() {}
 
 func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[4]
+	mi := &file_pingogate_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -274,7 +563,7 @@ func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatResponse.ProtoReflect.Descriptor instead.
 func (*HeartbeatResponse) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{4}
+	return file_pingogate_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HeartbeatResponse) GetAcknowledged() bool {
@@ -293,7 +582,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_pingogate_proto_msgTypes[5]
+	mi := &file_pingogate_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -305,7 +594,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[5]
+	mi := &file_pingogate_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -318,7 +607,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{5}
+	return file_pingogate_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HealthRequest) GetCurrentVersion() uint64 {
@@ -338,7 +627,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_pingogate_proto_msgTypes[6]
+	mi := &file_pingogate_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -350,7 +639,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[6]
+	mi := &file_pingogate_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -363,7 +652,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{6}
+	return file_pingogate_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HealthResponse) GetReady() bool {
@@ -389,7 +678,7 @@ type EncryptRequest struct {
 
 func (x *EncryptRequest) Reset() {
 	*x = EncryptRequest{}
-	mi := &file_pingogate_proto_msgTypes[7]
+	mi := &file_pingogate_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -401,7 +690,7 @@ func (x *EncryptRequest) String() string {
 func (*EncryptRequest) ProtoMessage() {}
 
 func (x *EncryptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[7]
+	mi := &file_pingogate_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -414,7 +703,7 @@ func (x *EncryptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EncryptRequest.ProtoReflect.Descriptor instead.
 func (*EncryptRequest) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{7}
+	return file_pingogate_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *EncryptRequest) GetPlaintext() []byte {
@@ -434,7 +723,7 @@ type EncryptResponse struct {
 
 func (x *EncryptResponse) Reset() {
 	*x = EncryptResponse{}
-	mi := &file_pingogate_proto_msgTypes[8]
+	mi := &file_pingogate_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -446,7 +735,7 @@ func (x *EncryptResponse) String() string {
 func (*EncryptResponse) ProtoMessage() {}
 
 func (x *EncryptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[8]
+	mi := &file_pingogate_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -459,7 +748,7 @@ func (x *EncryptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EncryptResponse.ProtoReflect.Descriptor instead.
 func (*EncryptResponse) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{8}
+	return file_pingogate_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *EncryptResponse) GetCiphertext() []byte {
@@ -488,7 +777,7 @@ type DecryptRequest struct {
 
 func (x *DecryptRequest) Reset() {
 	*x = DecryptRequest{}
-	mi := &file_pingogate_proto_msgTypes[9]
+	mi := &file_pingogate_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -500,7 +789,7 @@ func (x *DecryptRequest) String() string {
 func (*DecryptRequest) ProtoMessage() {}
 
 func (x *DecryptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[9]
+	mi := &file_pingogate_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -513,7 +802,7 @@ func (x *DecryptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecryptRequest.ProtoReflect.Descriptor instead.
 func (*DecryptRequest) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{9}
+	return file_pingogate_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DecryptRequest) GetCiphertext() []byte {
@@ -554,7 +843,7 @@ type DecryptResponse struct {
 
 func (x *DecryptResponse) Reset() {
 	*x = DecryptResponse{}
-	mi := &file_pingogate_proto_msgTypes[10]
+	mi := &file_pingogate_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -566,7 +855,7 @@ func (x *DecryptResponse) String() string {
 func (*DecryptResponse) ProtoMessage() {}
 
 func (x *DecryptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[10]
+	mi := &file_pingogate_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -579,7 +868,7 @@ func (x *DecryptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecryptResponse.ProtoReflect.Descriptor instead.
 func (*DecryptResponse) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{10}
+	return file_pingogate_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DecryptResponse) GetPlaintext() []byte {
@@ -606,7 +895,7 @@ type UsageEvent struct {
 
 func (x *UsageEvent) Reset() {
 	*x = UsageEvent{}
-	mi := &file_pingogate_proto_msgTypes[11]
+	mi := &file_pingogate_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -618,7 +907,7 @@ func (x *UsageEvent) String() string {
 func (*UsageEvent) ProtoMessage() {}
 
 func (x *UsageEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_pingogate_proto_msgTypes[11]
+	mi := &file_pingogate_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -631,7 +920,7 @@ func (x *UsageEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageEvent.ProtoReflect.Descriptor instead.
 func (*UsageEvent) Descriptor() ([]byte, []int) {
-	return file_pingogate_proto_rawDescGZIP(), []int{11}
+	return file_pingogate_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *UsageEvent) GetVersion() uint64 {
@@ -652,10 +941,37 @@ var File_pingogate_proto protoreflect.FileDescriptor
 
 const file_pingogate_proto_rawDesc = "" +
 	"\n" +
-	"\x0fpingogate.proto\x12\tpingogate\">\n" +
+	"\x0fpingogate.proto\x12\tpingogate\"\x92\x02\n" +
 	"\bSnapshot\x12\x18\n" +
-	"\aversion\x18\x01 \x01(\x04R\aversion\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload\"E\n" +
+	"\aversion\x18\x01 \x01(\x04R\aversion\x126\n" +
+	"\tproviders\x18\x02 \x03(\v2\x18.pingogate.ProviderEntryR\tproviders\x12-\n" +
+	"\x06routes\x18\x03 \x03(\v2\x15.pingogate.RouteEntryR\x06routes\x12=\n" +
+	"\fvirtual_keys\x18\x04 \x03(\v2\x1a.pingogate.VirtualKeyEntryR\vvirtualKeys\x12F\n" +
+	"\x0eencrypted_keys\x18\x05 \x03(\v2\x1f.pingogate.EncryptedProviderKeyR\rencryptedKeys\"\xfd\x01\n" +
+	"\rProviderEntry\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x19\n" +
+	"\bbase_url\x18\x03 \x01(\tR\abaseUrl\x12\x1f\n" +
+	"\vauth_method\x18\x04 \x01(\tR\n" +
+	"authMethod\x12*\n" +
+	"\x11encrypted_key_ref\x18\x05 \x01(\tR\x0fencryptedKeyRef\x12+\n" +
+	"\x11anthropic_version\x18\x06 \x01(\tR\x10anthropicVersion\x12/\n" +
+	"\x13capability_families\x18\a \x03(\tR\x12capabilityFamilies\"e\n" +
+	"\n" +
+	"RouteEntry\x12\x14\n" +
+	"\x05alias\x18\x01 \x01(\tR\x05alias\x12\x1a\n" +
+	"\bprovider\x18\x02 \x01(\tR\bprovider\x12%\n" +
+	"\x0eupstream_model\x18\x03 \x01(\tR\rupstreamModel\"\x89\x01\n" +
+	"\x14EncryptedProviderKey\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1e\n" +
+	"\n" +
+	"ciphertext\x18\x02 \x01(\fR\n" +
+	"ciphertext\x12\"\n" +
+	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12\x1d\n" +
+	"\n" +
+	"created_by\x18\x04 \x01(\tR\tcreatedBy\"!\n" +
+	"\x0fVirtualKeyEntry\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"E\n" +
 	"\x03Ack\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\x04R\aversion\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
@@ -719,41 +1035,49 @@ func file_pingogate_proto_rawDescGZIP() []byte {
 	return file_pingogate_proto_rawDescData
 }
 
-var file_pingogate_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_pingogate_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_pingogate_proto_goTypes = []any{
-	(*Snapshot)(nil),          // 0: pingogate.Snapshot
-	(*Ack)(nil),               // 1: pingogate.Ack
-	(*PushDeltaRequest)(nil),  // 2: pingogate.PushDeltaRequest
-	(*HeartbeatRequest)(nil),  // 3: pingogate.HeartbeatRequest
-	(*HeartbeatResponse)(nil), // 4: pingogate.HeartbeatResponse
-	(*HealthRequest)(nil),     // 5: pingogate.HealthRequest
-	(*HealthResponse)(nil),    // 6: pingogate.HealthResponse
-	(*EncryptRequest)(nil),    // 7: pingogate.EncryptRequest
-	(*EncryptResponse)(nil),   // 8: pingogate.EncryptResponse
-	(*DecryptRequest)(nil),    // 9: pingogate.DecryptRequest
-	(*DecryptResponse)(nil),   // 10: pingogate.DecryptResponse
-	(*UsageEvent)(nil),        // 11: pingogate.UsageEvent
+	(*Snapshot)(nil),             // 0: pingogate.Snapshot
+	(*ProviderEntry)(nil),        // 1: pingogate.ProviderEntry
+	(*RouteEntry)(nil),           // 2: pingogate.RouteEntry
+	(*EncryptedProviderKey)(nil), // 3: pingogate.EncryptedProviderKey
+	(*VirtualKeyEntry)(nil),      // 4: pingogate.VirtualKeyEntry
+	(*Ack)(nil),                  // 5: pingogate.Ack
+	(*PushDeltaRequest)(nil),     // 6: pingogate.PushDeltaRequest
+	(*HeartbeatRequest)(nil),     // 7: pingogate.HeartbeatRequest
+	(*HeartbeatResponse)(nil),    // 8: pingogate.HeartbeatResponse
+	(*HealthRequest)(nil),        // 9: pingogate.HealthRequest
+	(*HealthResponse)(nil),       // 10: pingogate.HealthResponse
+	(*EncryptRequest)(nil),       // 11: pingogate.EncryptRequest
+	(*EncryptResponse)(nil),      // 12: pingogate.EncryptResponse
+	(*DecryptRequest)(nil),       // 13: pingogate.DecryptRequest
+	(*DecryptResponse)(nil),      // 14: pingogate.DecryptResponse
+	(*UsageEvent)(nil),           // 15: pingogate.UsageEvent
 }
 var file_pingogate_proto_depIdxs = []int32{
-	0,  // 0: pingogate.SnapshotService.PushSnapshot:input_type -> pingogate.Snapshot
-	3,  // 1: pingogate.SnapshotService.Heartbeat:input_type -> pingogate.HeartbeatRequest
-	2,  // 2: pingogate.SnapshotService.PushDelta:input_type -> pingogate.PushDeltaRequest
-	7,  // 3: pingogate.KeyVaultService.Encrypt:input_type -> pingogate.EncryptRequest
-	9,  // 4: pingogate.KeyVaultService.Decrypt:input_type -> pingogate.DecryptRequest
-	11, // 5: pingogate.UsageService.ReportUsage:input_type -> pingogate.UsageEvent
-	5,  // 6: pingogate.HealthService.Check:input_type -> pingogate.HealthRequest
-	1,  // 7: pingogate.SnapshotService.PushSnapshot:output_type -> pingogate.Ack
-	4,  // 8: pingogate.SnapshotService.Heartbeat:output_type -> pingogate.HeartbeatResponse
-	1,  // 9: pingogate.SnapshotService.PushDelta:output_type -> pingogate.Ack
-	8,  // 10: pingogate.KeyVaultService.Encrypt:output_type -> pingogate.EncryptResponse
-	10, // 11: pingogate.KeyVaultService.Decrypt:output_type -> pingogate.DecryptResponse
-	1,  // 12: pingogate.UsageService.ReportUsage:output_type -> pingogate.Ack
-	6,  // 13: pingogate.HealthService.Check:output_type -> pingogate.HealthResponse
-	7,  // [7:14] is the sub-list for method output_type
-	0,  // [0:7] is the sub-list for method input_type
-	0,  // [0:0] is the sub-list for extension type_name
-	0,  // [0:0] is the sub-list for extension extendee
-	0,  // [0:0] is the sub-list for field type_name
+	1,  // 0: pingogate.Snapshot.providers:type_name -> pingogate.ProviderEntry
+	2,  // 1: pingogate.Snapshot.routes:type_name -> pingogate.RouteEntry
+	4,  // 2: pingogate.Snapshot.virtual_keys:type_name -> pingogate.VirtualKeyEntry
+	3,  // 3: pingogate.Snapshot.encrypted_keys:type_name -> pingogate.EncryptedProviderKey
+	0,  // 4: pingogate.SnapshotService.PushSnapshot:input_type -> pingogate.Snapshot
+	7,  // 5: pingogate.SnapshotService.Heartbeat:input_type -> pingogate.HeartbeatRequest
+	6,  // 6: pingogate.SnapshotService.PushDelta:input_type -> pingogate.PushDeltaRequest
+	11, // 7: pingogate.KeyVaultService.Encrypt:input_type -> pingogate.EncryptRequest
+	13, // 8: pingogate.KeyVaultService.Decrypt:input_type -> pingogate.DecryptRequest
+	15, // 9: pingogate.UsageService.ReportUsage:input_type -> pingogate.UsageEvent
+	9,  // 10: pingogate.HealthService.Check:input_type -> pingogate.HealthRequest
+	5,  // 11: pingogate.SnapshotService.PushSnapshot:output_type -> pingogate.Ack
+	8,  // 12: pingogate.SnapshotService.Heartbeat:output_type -> pingogate.HeartbeatResponse
+	5,  // 13: pingogate.SnapshotService.PushDelta:output_type -> pingogate.Ack
+	12, // 14: pingogate.KeyVaultService.Encrypt:output_type -> pingogate.EncryptResponse
+	14, // 15: pingogate.KeyVaultService.Decrypt:output_type -> pingogate.DecryptResponse
+	5,  // 16: pingogate.UsageService.ReportUsage:output_type -> pingogate.Ack
+	10, // 17: pingogate.HealthService.Check:output_type -> pingogate.HealthResponse
+	11, // [11:18] is the sub-list for method output_type
+	4,  // [4:11] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_pingogate_proto_init() }
@@ -767,7 +1091,7 @@ func file_pingogate_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pingogate_proto_rawDesc), len(file_pingogate_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   4,
 		},

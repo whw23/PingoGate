@@ -53,7 +53,9 @@ impl SnapshotService for SnapshotServiceImpl {
                 first_version = msg.version;
                 tracing::info!(
                     version = msg.version,
-                    payload_len = msg.payload.len(),
+                    providers = msg.providers.len(),
+                    routes = msg.routes.len(),
+                    encrypted_keys = msg.encrypted_keys.len(),
                     "gRPC push_snapshot: first snapshot received (S1 stub, not applied)"
                 );
             }

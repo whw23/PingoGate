@@ -11,9 +11,9 @@ import (
 	pb "github.com/whw23/pingogate/ctrl-go/internal/proto"
 )
 
-// PushEmpty sends a single Snapshot{version:1, payload:"S1-empty"} over the
-// PushSnapshot client-streaming RPC and returns the Ack from the Rust kernel.
-// This is the S1 connectivity probe (T11).
+// PushEmpty sends a single Snapshot{version:1} (no providers/routes/keys) over
+// the PushSnapshot client-streaming RPC and returns the Ack from the Rust
+// kernel. This is the S1 connectivity probe (T11).
 func PushEmpty(ctx context.Context, client pb.SnapshotServiceClient) error {
 	stream, err := client.PushSnapshot(ctx)
 	if err != nil {
@@ -22,7 +22,6 @@ func PushEmpty(ctx context.Context, client pb.SnapshotServiceClient) error {
 
 	if err := stream.Send(&pb.Snapshot{
 		Version: 1,
-		Payload: []byte("S1-empty"),
 	}); err != nil {
 		return fmt.Errorf("send snapshot: %w", err)
 	}
