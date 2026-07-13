@@ -1,0 +1,5 @@
+# core-rs/snapshot/Cargo.toml
+[package]
+name = "pingogate-snapshot"
+version.workspace = true
+edition.workspace = true

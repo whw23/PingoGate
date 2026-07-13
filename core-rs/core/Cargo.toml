@@ -1,0 +1,9 @@
+# core-rs/core/Cargo.toml
+[package]
+name = "pingogate-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

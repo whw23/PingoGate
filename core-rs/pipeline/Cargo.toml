@@ -1,0 +1,5 @@
+# core-rs/pipeline/Cargo.toml
+[package]
+name = "pingogate-pipeline"
+version.workspace = true
+edition.workspace = true

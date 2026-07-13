@@ -1,0 +1,37 @@
+# core-rs/Cargo.toml
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "storage",
+    "snapshot",
+    "router",
+    "transform",
+    "provider",
+    "pipeline",
+    "listener",
+    "pingogate-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[workspace.dependencies]
+pingora = "0.8"
+pingora-proxy = "0.8"
+pingora-core = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+arc-swap = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+prometheus = "0.13"
+bytes = "1"
+http = "0.2"
+tonic = "0.10"
+prost = "0.12"
+tonic-build = "0.10"

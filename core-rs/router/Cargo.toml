@@ -1,0 +1,5 @@
+# core-rs/router/Cargo.toml
+[package]
+name = "pingogate-router"
+version.workspace = true
+edition.workspace = true

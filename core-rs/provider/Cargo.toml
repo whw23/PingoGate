@@ -1,0 +1,5 @@
+# core-rs/provider/Cargo.toml
+[package]
+name = "pingogate-provider"
+version.workspace = true
+edition.workspace = true

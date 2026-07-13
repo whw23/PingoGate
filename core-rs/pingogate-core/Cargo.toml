@@ -1,0 +1,14 @@
+# core-rs/pingogate-core/Cargo.toml
+# The package name is `pingogate-core-bin` (not `pingogate-core`) because the
+# shared-types lib crate under `core/` already occupies the `pingogate-core`
+# package name per the task-2 brief. The produced binary is still named
+# `pingogate-core` via the [[bin]] target below, matching the constitution's
+# "pingogate-core (main binary)" requirement.
+[package]
+name = "pingogate-core-bin"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pingogate-core"
+path = "src/main.rs"

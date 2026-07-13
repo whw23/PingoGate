@@ -1,0 +1,5 @@
+# core-rs/listener/Cargo.toml
+[package]
+name = "pingogate-listener"
+version.workspace = true
+edition.workspace = true

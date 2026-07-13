@@ -1,0 +1,5 @@
+# core-rs/storage/Cargo.toml
+[package]
+name = "pingogate-storage"
+version.workspace = true
+edition.workspace = true

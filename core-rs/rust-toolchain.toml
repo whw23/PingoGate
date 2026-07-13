@@ -1,0 +1,10 @@
+# core-rs/rust-toolchain.toml
+# Brief specified channel = "1.75.0" (the MSRV floor). Using "stable" instead to
+# avoid forcing a 1.75.0 toolchain download in environments that already have a
+# newer stable toolchain (here 1.96.0). The MSRV floor is still declared via
+# workspace.package.rust-version = "1.75", so any crate that builds on 1.75+ is
+# accepted. Switch this to "1.75.0" if reproducible-against-floor tooling is
+# required in CI.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
