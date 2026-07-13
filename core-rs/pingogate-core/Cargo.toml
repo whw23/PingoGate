@@ -5,5 +5,21 @@
 # under `core/` as package `pingogate-core-types`.
 [package]
 name = "pingogate-core"
+description = "PingoGate Rust kernel binary: bootstrap, signals, server assembly."
 version.workspace = true
 edition.workspace = true
+
+[[bin]]
+name = "pingogate-core"
+path = "src/main.rs"
+
+[dependencies]
+pingogate-core-types = { path = "../core" }
+pingogate-snapshot = { path = "../snapshot" }
+pingogate-pipeline = { path = "../pipeline" }
+pingogate-listener = { path = "../listener" }
+pingogate-storage = { path = "../storage" }
+pingora = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

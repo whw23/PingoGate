@@ -1288,6 +1288,17 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 [[package]]
 name = "pingogate-core"
 version = "0.1.0"
+dependencies = [
+ "pingogate-core-types",
+ "pingogate-listener",
+ "pingogate-pipeline",
+ "pingogate-snapshot",
+ "pingogate-storage",
+ "pingora",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "pingogate-core-types"
@@ -1303,6 +1314,19 @@ dependencies = [
 [[package]]
 name = "pingogate-listener"
 version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "http",
+ "pingogate-core-types",
+ "pingogate-pipeline",
+ "pingogate-snapshot",
+ "pingogate-storage",
+ "pingora",
+ "serde_json",
+ "subtle",
+ "tracing",
+]
 
 [[package]]
 name = "pingogate-pipeline"
@@ -2239,6 +2263,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

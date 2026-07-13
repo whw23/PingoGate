@@ -1,0 +1,26 @@
+# pingogate-core.yaml.example
+# Standalone-mode example config for the pingogate-core binary.
+#
+# Copy to pingogate-core.yaml and set the referenced env vars before starting:
+#   export PINGO_KEY_ALPHA="your-gateway-key"
+#   export OPENAI_API_KEY="sk-..."
+#   export PINGO_ADMIN_TOKEN="your-admin-token"   # R1: required for authed admin endpoints
+
+listeners:
+  public: { address: "0.0.0.0:8080" }
+  admin:  { address: "127.0.0.1:9090" }
+
+gateway_keys:
+  - { name: "team-alpha", secret_ref: "env:PINGO_KEY_ALPHA", enabled: true }
+
+providers:
+  - name: "openai-main"
+    kind: "openai-compatible"
+    base_url: "https://api.openai.com"
+    auth: { method: "bearer", key_ref: "env:OPENAI_API_KEY" }
+    capability_families: ["generation.stateless"]
+
+routes:
+  - { alias: "gpt-4o", provider: "openai-main", upstream_model: "gpt-4o" }
+
+upstream: { timeout_ms: 60000 }

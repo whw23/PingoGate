@@ -1,5 +1,19 @@
 # core-rs/listener/Cargo.toml
 [package]
 name = "pingogate-listener"
+description = "Server and listener assembly: public + admin Pingora service factories."
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+pingogate-core-types = { path = "../core" }
+pingogate-snapshot = { path = "../snapshot" }
+pingogate-pipeline = { path = "../pipeline" }
+pingogate-storage = { path = "../storage" }
+pingora = { workspace = true }
+async-trait = { workspace = true }
+arc-swap = { workspace = true }
+http = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+subtle = { workspace = true }
