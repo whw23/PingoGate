@@ -1,6 +1,6 @@
 # core-rs/core/Cargo.toml
 [package]
-name = "pingogate-core"
+name = "pingogate-core-types"
 version.workspace = true
 edition.workspace = true
 
