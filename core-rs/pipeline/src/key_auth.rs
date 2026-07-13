@@ -13,6 +13,7 @@
 
 use pingogate_core_types::Principal;
 use pingogate_snapshot::RuntimeSnapshot;
+use subtle::ConstantTimeEq;
 
 /// Verifies a presented gateway-key credential against the active snapshot.
 pub trait KeyAuth: Send + Sync {
@@ -22,8 +23,9 @@ pub trait KeyAuth: Send + Sync {
 }
 
 /// Standalone-mode authenticator: matches the presented credential against the
-/// snapshot's enabled gateway keys by constant-time-ish equality (S1 uses plain
-/// `==`; S2's KeyVault path will use a constant-time compare).
+/// snapshot's enabled gateway keys using constant-time comparison
+/// ([`subtle::ConstantTimeEq`]) to avoid timing side-channels on the secret
+/// comparison (constitution XX).
 pub struct StaticKeyAuth;
 
 impl KeyAuth for StaticKeyAuth {
@@ -31,7 +33,7 @@ impl KeyAuth for StaticKeyAuth {
         snapshot
             .gateway_keys
             .iter()
-            .find(|k| k.secret.expose() == credential)
+            .find(|k| bool::from(credential.as_bytes().ct_eq(k.secret.expose().as_bytes())))
             .map(|k| Principal::gateway_key(&k.name))
     }
 }

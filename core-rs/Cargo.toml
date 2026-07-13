@@ -39,3 +39,7 @@ tonic = "0.10"
 prost = "0.12"
 tonic-build = "0.10"
 async-trait = "0.1"
+# Constant-time comparison for credential checks (constitution XX security).
+subtle = "2"
+# Lightweight percent-encoding for upstream URL query values.
+percent-encoding = "2"

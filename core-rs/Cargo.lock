@@ -1311,11 +1311,13 @@ dependencies = [
  "async-trait",
  "bytes",
  "http",
+ "percent-encoding",
  "pingogate-core-types",
  "pingogate-provider",
  "pingogate-snapshot",
  "pingora",
  "serde_json",
+ "subtle",
  "tracing",
 ]
 

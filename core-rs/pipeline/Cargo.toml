@@ -15,3 +15,5 @@ serde_json = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
+subtle = { workspace = true }
+percent-encoding = { workspace = true }

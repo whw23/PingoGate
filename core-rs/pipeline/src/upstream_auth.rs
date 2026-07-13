@@ -5,6 +5,7 @@
 //! the snapshot's `ResolvedProvider`; adapters never see plaintext.
 
 use pingogate_core_types::AuthMethod;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
 /// Inbound header names that carry a gateway key; stripped before forwarding.
 pub const GATEWAY_KEY_HEADERS: [&str; 2] = ["authorization", "x-api-key"];
@@ -38,11 +39,15 @@ impl UpstreamAuth {
 }
 
 /// Append `key=<value>` to an origin-form path-and-query string (Gemini).
+///
+/// The key is percent-encoded with [`NON_ALPHANUMERIC`] so special characters
+/// (`&`, `=`, `#`, space, ...) cannot break the query or inject extra params.
 pub fn append_query_key(path_and_query: &str, key: &str) -> String {
+    let enc = utf8_percent_encode(key, NON_ALPHANUMERIC).to_string();
     if path_and_query.contains('?') {
-        format!("{path_and_query}&key={key}")
+        format!("{path_and_query}&key={enc}")
     } else {
-        format!("{path_and_query}?key={key}")
+        format!("{path_and_query}?key={enc}")
     }
 }
 
@@ -78,6 +83,21 @@ mod tests {
         assert_eq!(
             append_query_key("/v1beta/x:generateContent?alt=sse", "k"),
             "/v1beta/x:generateContent?alt=sse&key=k"
+        );
+    }
+
+    #[test]
+    fn query_key_percent_encodes_special_chars() {
+        // `&` and `=` would otherwise inject/break query params; `#` would
+        // start a fragment; space is illegal in a query value.
+        assert_eq!(
+            append_query_key("/v1beta/x:generateContent", "a&b=c#d e"),
+            "/v1beta/x:generateContent?key=a%26b%3Dc%23d%20e"
+        );
+        // Pure ASCII alphanum is left untouched (regression guard).
+        assert_eq!(
+            append_query_key("/v1beta/x:generateContent?alt=sse", "sk123"),
+            "/v1beta/x:generateContent?alt=sse&key=sk123"
         );
     }
 }
