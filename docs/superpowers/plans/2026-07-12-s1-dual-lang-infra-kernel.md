@@ -64,7 +64,7 @@ S1 分 12 个任务,每个独立可测试。任务间依赖顺序:T1(proto)→ T
 
 **Interfaces:**
 - Consumes: 无(基础)
-- Produces: `proto/pingogate.proto` 定义三个 gRPC 服务骨架,供 T11(Go client)和 S2/S3 消费。消息类型:`Snapshot`(含 version + providers + routes + virtual_keys + encrypted_keys 占位)、`Ack`(含 version + ok)、`EncryptRequest`/`EncryptResponse`/`DecryptRequest`/`DecryptResponse`、`UsageEvent`。S1 字段最小化(占位),S2/S3 扩展。
+- Produces: `proto/pingogate.proto` 定义 gRPC 服务骨架(SnapshotService 含 PushSnapshot + Heartbeat、KeyVaultService、UsageService、HealthService)+ PushDelta 预留位置(不实现)。消息:Snapshot/Ack/Heartbeat*/Encrypt*/Decrypt*/UsageEvent/Health*。所有 gRPC 调用经 mTLS + internal token(spec §12A),proto 不含 token 字段(经 gRPC metadata 传递)。
 
 - [ ] **Step 1: 写 proto 文件**
 
@@ -74,29 +74,36 @@ syntax = "proto3";
 package pingogate;
 option go_package = "github.com/whw23/pingogate/ctrl-go/internal/proto;pingogatepb";
 
-// SnapshotService: Go -> Rust 推送运行时快照(S1 仅骨架,S2 实现)
+// 所有服务:调用方经 gRPC metadata 携带 x-internal-token(spec §12A);
+// 传输经 mTLS(Rust/Go 互验证书,仅 127.0.0.1)。
+
+// SnapshotService: Go -> Rust 推送运行时快照(S1 骨架,S2 实现)
 service SnapshotService {
-  // 全量推送快照;Rust 收到后 ArcSwap 切换,回 Ack
   rpc PushSnapshot(stream Snapshot) returns (Ack);
-  // 心跳:Rust 报告当前 version,S1 证伪连通用
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // 预留:增量推送(S2/S3 不实现,转增量触发条件见 spec §12C)
+  rpc PushDelta(stream PushDeltaRequest) returns (Ack);
 }
 
-// KeyVaultService: Go -> Rust 加解密(S1 仅骨架,S2 实现加密)
+// KeyVaultService: Go -> Rust 加解密(S1 骨架,S2 实现加密)
 service KeyVaultService {
   rpc Encrypt(EncryptRequest) returns (EncryptResponse);
   rpc Decrypt(DecryptRequest) returns (DecryptResponse);
 }
 
-// UsageService: Rust -> Go 推 usage 事件(S1 仅骨架,S3 实现)
+// UsageService: Rust -> Go 推 usage 事件(S1 骨架,S3 实现)
 service UsageService {
   rpc ReportUsage(stream UsageEvent) returns (Ack);
 }
 
+// HealthService: 双向心跳 + Rust 报告当前快照 version(spec §3.3/§12C 恢复)
+service HealthService {
+  rpc Check(HealthRequest) returns (HealthResponse);
+}
+
 message Snapshot {
   uint64 version = 1;
-  // S1 最小占位;S2 扩展 providers/routes/virtual_keys/encrypted_keys
-  bytes payload = 2;
+  bytes payload = 2;  // S1 占位;S2 扩展
 }
 
 message Ack {
@@ -105,12 +112,27 @@ message Ack {
   string error = 3;
 }
 
+// 预留:增量推送(S2/S3 不实现)
+message PushDeltaRequest {
+  uint64 from_version = 1;
+  uint64 to_version = 2;
+  // S2/S3 不填;转增量时扩展 added/modified/removed
+}
+
 message HeartbeatRequest {
   uint64 current_version = 1;
   bool ready = 2;
 }
 message HeartbeatResponse {
   bool acknowledged = 1;
+}
+
+message HealthRequest {
+  uint64 current_version = 1;  // Rust 报告当前快照 version
+}
+message HealthResponse {
+  bool ready = 1;              // Rust 是否 ready(收到首个全量快照后)
+  uint64 version = 2;
 }
 
 message EncryptRequest {
@@ -838,6 +860,22 @@ git show redesign:app/pingogate/src/watch.rs > core-rs/pingogate-core/src/watch.
 
 001 的 main.rs 直接读 config 构建 snapshot。改为经 `FileSnapshotSource::build_snapshot` + `StaticKeyAuth`,平台模式位置预留。
 
+- [ ] **Step 2a: 管理端点 6 个(经 authorize 边界,R1 定单 token)**
+
+R1 决策:**单机模式 admin 鉴权用单 token**(`env:PINGO_ADMIN_TOKEN`,启动校验存在)。移植 001 `app/admin/src/handler.rs` 的 6 端点,经 `Principal::admin` + `authorize` 边界(宪法 XX):
+
+```rust
+// core-rs/listener/src/admin.rs(6 端点,经 authorize)
+// GET /healthz   -> 存活(不经鉴权,探针用)
+// GET /readyz    -> 就绪(snapshot 已加载;平台模式含 gRPC 首同步检查,spec §12B)
+// GET /metrics   -> Prometheus 指标(不经鉴权,scrape 用;或经鉴权看部署)
+// POST /reload   -> 触发热重载(经 authorize Admin)
+// GET /reload/status -> 最近重载结果/版本/回滚目标(经 authorize Admin)
+// POST /config/validate -> 校验候选配置不改变活跃 snapshot(经 authorize Admin)
+```
+
+单机模式 admin token:`env:PINGO_ADMIN_TOKEN`,启动校验存在,缺失则 admin 端点拒绝(spec §12B 模式:缺失即失败,不给无鉴权降级)。`/healthz`/`/metrics` 不经鉴权(探针/scrape),其余 4 端点经 `Principal::admin` + `authorize(Admin, ...)`。
+
 - [ ] **Step 3: 写 pingogate-core.yaml.example**
 
 ```yaml
@@ -918,18 +956,59 @@ git commit -m "test(pingogate-core): e2e six-interface passthrough (standalone m
 
 ---
 
-### Task 11: Go gRPC client 骨架(连 Rust 推空快照)
+### Task 11: Go gRPC client 骨架(mTLS + internal token,连 Rust 推空快照)
 
 **Files:**
 - Create: `ctrl-go/go.mod`
 - Create: `ctrl-go/cmd/pingogate-ctrl/main.go`
 - Create: `ctrl-go/internal/snapshot/client.go`
+- Create: `ctrl-go/internal/grpcmtls/{ca,certs}.go`(R10:首次启动生成自签 CA + 互验证书)
+- Create: `core-rs/pingogate-core/src/grpc_auth.rs`(internal token 校验 interceptor)
 
 **Interfaces:**
 - Consumes: T1 proto 生成的 `pingogatepb`
-- Produces: `pingogate-ctrl` 二进制,连 Rust gRPC(S1 Rust gRPC server 空壳,见 Step 1),推空快照证伪连通
+- Produces: `pingogate-ctrl` 二进制,经 **mTLS + internal token**(spec §12A)连 Rust gRPC,推空快照证伪连通。R10 决策:首次启动 Go 生成自签 CA + Rust/Go 各证书。
 
-**注**:S1 Rust 侧 gRPC server 也是空壳(tonic 服务实现返回空 Ack),S2 才实现真实逻辑。此 task 先在 Rust 加 gRPC server 空壳 + Go client 连它。
+**注**:S1 Rust 侧 gRPC server 也是空壳(tonic 服务实现返回空 Ack),S2 才实现真实逻辑。此 task 先在 Rust 加 gRPC server 空壳(含 mTLS + token 校验)+ Go client 经 mTLS 连它。
+
+- [ ] **Step 1a: Go 生成自签 CA + Rust/Go 互验证书(R10)**
+
+```go
+// ctrl-go/internal/grpcmtls/ca.go
+// 首次启动:生成自签 CA + 签发 ctrl.pem/ctrl.key(Go)+ core.pem/core.key(Rust)
+// 证书存 ctrl-go/internal/grpcmtls/certs/(gitignore),Rust 启动时从环境/文件加载 core.pem
+// Rust 侧证书经 env PINGO_GRPC_CERT/PINGO_GRPC_KEY 传路径,Go 侧用本地 certs/
+func EnsureCerts(dir string) error { /* 首次生成,已存在则跳过 */ }
+```
+
+- [ ] **Step 1b: Rust gRPC server 加 mTLS + internal token 校验**
+
+```rust
+// core-rs/pingogate-core/src/grpc.rs(改造:加 mTLS + token interceptor)
+use tonic::transport::{Server, Certificate, Identity};
+use tonic::service::interceptor;
+
+pub async fn serve_grpc(addr: SocketAddr, cert: Certificate, key: Identity, internal_token: String) -> Result<()> {
+    let tls = tonic::transport::ServerTlsConfig::new()
+        .identity(key)
+        .client_ca_root(cert);  // mTLS:互验
+    Server::builder()
+        .tls_config(tls)?
+        .interceptor(move |req| {  // internal token 校验(spec §12A)
+            let token = req.metadata().get("x-internal-token")
+                .and_then(|v| v.to_str().ok());
+            match token {
+                Some(t) if t == internal_token => Ok(req),
+                _ => Err(Status::unauthenticated("invalid internal token")),
+            }
+        })
+        .add_service(SnapshotServiceServer::new(SnapshotServiceImpl))
+        .add_service(HealthServiceServer::new(HealthServiceImpl))
+        .serve(addr).await
+}
+```
+
+`main.rs` 平台模式:加载 `env:PINGO_INTERNAL_TOKEN`(缺失即失败,spec §12B)+ 证书,调 `serve_grpc`。
 
 - [ ] **Step 1: 在 Rust pingogate-core 加 gRPC server 空壳**
 
@@ -956,7 +1035,7 @@ impl snapshot_service_server::SnapshotService for SnapshotServiceImpl {
 
 `main.rs` 启动 gRPC server(平台模式时;单机模式不启动)。
 
-- [ ] **Step 2: 写 Go module + main.go**
+- [ ] **Step 2: 写 Go module + main.go(mTLS + internal token)**
 
 ```go
 // ctrl-go/go.mod
@@ -975,20 +1054,33 @@ require (
 package main
 
 import (
+    "context"
     "log"
+    "os"
     "google.golang.org/grpc"
-    "google.golang.org/grpc/credentials/insecure"
+    "google.golang.org/grpc/credentials"
     pb "github.com/whw23/pingogate/ctrl-go/internal/proto"
+    "github.com/whw23/pingogate/ctrl-go/internal/grpcmtls"
+    "github.com/whw23/pingogate/ctrl-go/internal/snapshot"
 )
 
 func main() {
-    conn, err := grpc.Dial("127.0.0.1:9091", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    internalToken := os.Getenv("PINGO_INTERNAL_TOKEN")
+    if internalToken == "" { log.Fatal("PINGO_INTERNAL_TOKEN required") }
+    if err := grpcmtls.EnsureCerts("internal/grpcmtls/certs"); err != nil { log.Fatal(err) }
+    creds, err := grpcmtls.ClientCredentials("internal/grpcmtls/certs")
+    if err != nil { log.Fatal(err) }
+    conn, err := grpc.Dial("127.0.0.1:9091",
+        grpc.WithTransportCredentials(creds),  // mTLS
+        grpc.WithUnaryInterceptor(grpcmtls.TokenUnaryInterceptor(internalToken)),  // internal token
+        grpc.WithStreamInterceptor(grpcmtls.TokenStreamInterceptor(internalToken)),
+    )
     if err != nil { log.Fatalf("dial: %v", err) }
     defer conn.Close()
-    client := pb.NewSnapshotServiceClient(conn)
-    // S1:推空快照证伪连通(见 client.go)
-    if err := snapshot.PushEmpty(context.Background(), client); err != nil { log.Fatalf("push: %v", err) }
-    log.Println("S1: gRPC connected, empty snapshot pushed")
+    if err := snapshot.PushEmpty(context.Background(), pb.NewSnapshotServiceClient(conn)); err != nil {
+        log.Fatalf("push: %v", err)
+    }
+    log.Println("S1: gRPC connected (mTLS + token), empty snapshot pushed")
 }
 ```
 
@@ -1094,20 +1186,42 @@ package snapshot
 
 import (
     "context"
+    "os"
     "testing"
     pb "github.com/whw23/pingogate/ctrl-go/internal/proto"
+    "github.com/whw23/pingogate/ctrl-go/internal/grpcmtls"
     "google.golang.org/grpc"
-    "google.golang.org/grpc/credentials/insecure"
 )
 
 func TestPushEmptyContract(t *testing.T) {
-    // S1 契约:Go client 能连 Rust gRPC 并推空快照(需 Rust server 运行)
-    // S2 入口检查时跑此测试
-    conn, err := grpc.Dial("127.0.0.1:9091", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    // S1 契约:Go client 经 mTLS + internal token 连 Rust gRPC 推空快照
+    creds, err := grpcmtls.ClientCredentials("internal/grpcmtls/certs")
+    if err != nil { t.Skipf("certs not ready: %v", err) }
+    token := os.Getenv("PINGO_INTERNAL_TOKEN")
+    conn, err := grpc.Dial("127.0.0.1:9091",
+        grpc.WithTransportCredentials(creds),
+        grpc.WithUnaryInterceptor(grpcmtls.TokenUnaryInterceptor(token)),
+        grpc.WithStreamInterceptor(grpcmtls.TokenStreamInterceptor(token)),
+    )
     if err != nil { t.Skipf("Rust gRPC not running: %v", err) }
     defer conn.Close()
     if err := PushEmpty(context.Background(), pb.NewSnapshotServiceClient(conn)); err != nil {
         t.Fatalf("push empty: %v", err)
+    }
+}
+
+func TestGrpcRejectsMissingOrWrongToken(t *testing.T) {
+    // spec §12A 安全:gRPC 无 token / 错 token 调用被拒绝
+    creds, _ := grpcmtls.ClientCredentials("internal/grpcmtls/certs")
+    for _, token := range []string{"", "wrong-token"} {
+        conn, err := grpc.Dial("127.0.0.1:9091",
+            grpc.WithTransportCredentials(creds),
+            grpc.WithUnaryInterceptor(grpcmtls.TokenUnaryInterceptor(token)),
+        )
+        if err != nil { t.Skipf("not running: %v", err) }
+        // 调任意 RPC,断言 PermissionDenied / Unauthenticated
+        // (具体调用略,断言 status.Code(err) == codes.Unauthenticated)
+        conn.Close()
     }
 }
 ```

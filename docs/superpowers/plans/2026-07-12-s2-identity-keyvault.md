@@ -576,6 +576,24 @@ func BootstrapAdmin(ctx context.Context, store *Store, token string) error {
 
 main.go 启动调:`BootstrapAdmin(ctx, store, os.Getenv("PINGO_BOOTSTRAP_ADMIN_TOKEN"))`。
 
+- [ ] **Step 2a: 启动校验(spec §12B:环境变量缺失即失败,不给降级路径)**
+
+```go
+// ctrl-go/cmd/pingogate-ctrl/main.go(启动校验)
+func main() {
+    // spec §12B:主密钥 + gRPC 内部 token + bootstrap admin token 缺失即失败
+    mkek := os.Getenv("PINGO_MKEK")
+    if len(mkek) != 32 { log.Fatal("PINGO_MKEK must be 32 bytes") }
+    internalToken := os.Getenv("PINGO_INTERNAL_TOKEN")
+    if internalToken == "" { log.Fatal("PINGO_INTERNAL_TOKEN required") }
+    bootstrapToken := os.Getenv("PINGO_BOOTSTRAP_ADMIN_TOKEN")
+    if bootstrapToken == "" { log.Fatal("PINGO_BOOTSTRAP_ADMIN_TOKEN required (first start)") }
+    // ... 装配
+}
+```
+
+Rust 侧 `main.rs` 同样校验 `PINGO_MKEK`(32 bytes)+ `PINGO_INTERNAL_TOKEN` 缺失即 panic(spec §12B,不给明文存 key 降级)。T16 已加 MKEK,补 internal token 校验。
+
 - [ ] **Step 3: 写 authorize 中间件(Principal + authorize 边界)**
 
 ```go
@@ -818,6 +836,84 @@ Expected: PASS。
 ```bash
 git add ctrl-go/internal/snapshot/
 git commit -m "feat(snapshot): build snapshot from DB + push to Rust via gRPC (full + version + ack)"
+```
+
+- [ ] **Step 7: 崩溃恢复测试(spec §12C)**
+
+```go
+// ctrl-go/internal/snapshot/recovery_test.go
+func TestRustCrashRecovery(t *testing.T) {
+    // 1. Go 推快照 v1 -> Rust 接收
+    // 2. 模拟 Rust 崩溃重启(内存空)
+    // 3. Go 检测重连(HealthService.Check 报 ready=false/version=0)
+    // 4. Go 推全量 v1 -> Rust ready=true
+    // 5. 验证 Rust holder.version == 1
+}
+
+func TestGoCrashRustServesWithOldSnapshot(t *testing.T) {
+    // 1. Go 推快照 v1 -> Rust 接收
+    // 2. Go 崩溃 -> Rust 热路径继续读旧快照(零中断)
+    // 3. 请求仍能透传(用旧快照的 provider key)
+    // 4. Go 重启 -> 读 DB -> 推当前全量 -> Rust 切换
+}
+```
+
+Run: `cd ctrl-go && go test ./internal/snapshot/ -run TestRustCrash\|TestGoCrash`
+Expected: PASS(崩溃恢复语义正确)。
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add ctrl-go/internal/snapshot/recovery_test.go
+git commit -m "test(snapshot): crash recovery (Rust restart re-sync, Go crash Rust serves old)"
+```
+
+---
+
+### Task 20a: Go admin package(管理面 API + reload 编排)
+
+**Files:**
+- Create: `ctrl-go/internal/admin/{handler,reload}.go`
+
+**Interfaces:**
+- Consumes: T18 identity(authorize);T20 snapshot(触发 Rust 热重载);S1 Rust 管理端点(经 gRPC 或 HTTP 转发)
+- Produces: Go 管理面 API(健康/就绪/reload 编排)+ 触发 Rust 热重载
+
+- [ ] **Step 1: 写 admin handler(健康/就绪/reload 编排)**
+
+```go
+// ctrl-go/internal/admin/handler.go
+// GET /admin/healthz -> Go 存活
+// GET /admin/readyz -> Go 就绪(DB + gRPC 连 Rust)
+// POST /admin/reload -> 触发 Rust 热重载(经 gRPC SnapshotService 推当前全量,或调 Rust /reload)
+//   reload 编排:Go 读 DB -> 构建快照 -> 推 Rust -> 等 ack -> 返回结果
+// 经 identity.Authorize(Admin, ...) 边界
+```
+
+- [ ] **Step 2: 写 reload 编排(触发 Rust 热重载)**
+
+```go
+// ctrl-go/internal/admin/reload.go
+func (h *Handler) Reload(ctx context.Context) error {
+    // Go 侧:重建快照(读 DB)-> 推 Rust(spec §4.4 触发源之一)
+    return h.pusher.Push(ctx)
+}
+```
+
+- [ ] **Step 3: 测试 admin 端点 + authorize 边界**
+
+```go
+func TestAdminReloadRequiresAdmin(t *testing.T) {
+    // 非 admin 调 /admin/reload -> 403
+    // admin 调 -> 触发推送 -> 200
+}
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add ctrl-go/internal/admin/
+git commit -m "feat(admin): management API (healthz/readyz/reload orchestration) + authorize"
 ```
 
 ---

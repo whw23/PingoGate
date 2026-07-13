@@ -643,11 +643,32 @@ func TestRevealDeniedForNonCreator(t *testing.T) {
 Run: `cd core-rs && cargo test -p pingogate-keyvault` + `cd ctrl-go && go test ./internal/keymgmt/`
 Expected: PASS。
 
+- [ ] **Step 4a: 安全测试--密钥不泄漏抽样审计(spec §12D)**
+
+```rust
+// core-rs/pingogate-core/tests/security_no_leak.rs
+#[test]
+fn no_plaintext_key_in_logs_metrics_errors() {
+    // 1. 录入已知明文 key "sk-test-LEAKMARKER-12345"
+    // 2. 跑一批请求(成功/失败/鉴权失败/无路由)
+    // 3. 抓取所有 tracing 日志 + Prometheus 指标 + 错误响应体
+    // 4. 断言 "LEAKMARKER" 不出现在任何输出(抽样审计 0 明文)
+    // 覆盖:Rust 日志/指标/错误 + Go slog/REST 错误体
+}
+```
+
+```go
+// ctrl-go/internal/keymgmt/no_leak_test.go
+func TestNoPlaintextInGoOutputs(t *testing.T) {
+    // 抓 Go slog 日志 + REST 响应,断言无明文 key
+}
+```
+
 - [ ] **Step 5: Commit**
 
 ```bash
-git add core-rs/keyvault/src/grpc_service.rs ctrl-go/internal/keymgmt/handler.go
-git commit -m "feat(keymgmt,keyvault): 1Password dual-defense (Go created_by + Rust owner intercept)"
+git add core-rs/keyvault/src/grpc_service.rs ctrl-go/internal/keymgmt/ core-rs/pingogate-core/tests/security_no_leak.rs
+git commit -m "feat(keymgmt,keyvault): 1Password dual-defense + no-plaintext-leak audit test"
 ```
 
 ---
@@ -706,6 +727,22 @@ func (s *Server) ReportUsage(stream pb.UsageService_ReportUsageServer) error {
         s.store.Insert(ctx, event)
     }
 }
+```
+
+- [ ] **Step 2a: slog 结构化审计日志(spec §9:管理操作审计 who/what/when)**
+
+```go
+// ctrl-go/internal/usage/server.go + ctrl-go/internal/identity/middleware.go
+// 所有管理操作(用户/key/vkey CRUD + reveal + reload)经 slog 审计:
+slog.InfoContext(ctx, "admin action",
+    slog.String("who", user.ID),
+    slog.String("what", action),  // create_user / reveal_key / revoke_vkey / reload
+    slog.String("when", time.Now().UTC().Format(time.RFC3339)),
+    slog.String("resource", resourceID),
+)
+// 密钥脱敏:reveal_key 审计记 "reveal requested",不记明文/密文
+// usage 落库审计:记 owner+vkey+token 数,不记 body 内容
+```
 ```
 
 - [ ] **Step 3: 写 tiktoken-go 估算器**
@@ -837,6 +874,33 @@ func TestS3Contract(t *testing.T) {
     // 1Password 双防线 / vkey 签发 / usage 落库
 }
 ```
+
+- [ ] **Step 1a: 性能基准测试(spec §10/§12D:SC-7 p50<5ms/p95<20ms,默认 #[ignore])**
+
+移植 001 `app/pingogate/tests/benchmark.rs`(已有 p50≈1.5ms/p95≈1.7ms 基准),适配六接口 + 平台模式热路径解密:
+
+```rust
+// core-rs/pingogate-core/tests/benchmark.rs
+// 测无状态透传延迟(mock 上游,排除上游 RTT),分单机/平台模式
+// 平台模式含每请求 KeyVault 解密(~0.2µs)+ usage 提取(inline)
+
+#[tokio::test]
+#[ignore]  // 默认不跑,显式 --ignored 才跑,回归阻止合入
+async fn bench_standalone_passthrough_p50_p95() {
+    // 跑 N 次透传,统计 p50/p95
+    // 断言 p50 < 5ms && p95 < 20ms(spec SC-7)
+}
+
+#[tokio::test]
+#[ignore]
+async fn bench_platform_passthrough_with_decrypt() {
+    // 平台模式:含 KeyVault 每请求解密 + usage 提取
+    // 断言 p50 < 5ms && p95 < 20ms(验证 ~0.2µs 解密 + inline usage 不破预算)
+}
+```
+
+Run(显式):`cd core-rs && cargo test -p pingogate-core --test benchmark -- --ignored`
+Expected: p50 < 5ms / p95 < 20ms(回归阻止合入)。
 
 - [ ] **Step 2: 跑全部测试(Rust + Go)**
 
