@@ -3,3 +3,6 @@
 name = "pingogate-pipeline"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+pingogate-core-types = { path = "../core" }

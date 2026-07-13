@@ -124,6 +124,9 @@ version = "0.1.0"
 [[package]]
 name = "pingogate-pipeline"
 version = "0.1.0"
+dependencies = [
+ "pingogate-core-types",
+]
 
 [[package]]
 name = "pingogate-provider"
