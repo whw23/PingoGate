@@ -1,0 +1,33 @@
+listeners:
+  public:
+    address: "127.0.0.1:__PUBLIC__"
+  admin:
+    address: "127.0.0.1:__ADMIN__"
+gateway_keys:
+  - name: "team"
+    secret_ref: "env:PINGO_GATEWAY_KEY_TEAM"
+providers:
+  - name: "openai-up"
+    kind: "openai-compatible"
+    base_url: "http://127.0.0.1:__MOCK__"
+    auth:
+      method: "bearer"
+      key_ref: "env:OPENAI_KEY"
+    capability_families: ["generation.stateless"]
+  - name: "anthropic-up"
+    kind: "anthropic"
+    base_url: "http://127.0.0.1:__MOCK__"
+    anthropic_version: "2023-06-01"
+    auth:
+      method: "api_key_header"
+      key_ref: "env:ANTHROPIC_KEY"
+    capability_families: ["generation.stateless"]
+  - name: "gemini-up"
+    kind: "gemini"
+    base_url: "http://127.0.0.1:__MOCK__"
+    auth:
+      method: "query_key"
+      key_ref: "env:GEMINI_KEY"
+    capability_families: ["generation.stateless"]
+routes:
+__ROUTES__

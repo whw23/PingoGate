@@ -1295,6 +1295,7 @@ dependencies = [
  "pingogate-snapshot",
  "pingogate-storage",
  "pingora",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
