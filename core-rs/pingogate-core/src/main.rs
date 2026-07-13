@@ -49,6 +49,11 @@ const GRPC_CERT_ENV: &str = "PINGO_GRPC_CERT";
 const GRPC_KEY_ENV: &str = "PINGO_GRPC_KEY";
 /// Env var: path to the CA certificate PEM that signed the Go client cert.
 const GRPC_CA_ENV: &str = "PINGO_GRPC_CA";
+/// Env var holding the 32-byte AES-GCM master key (constitution XX KeyVault).
+/// Required in platform mode; missing or not exactly 32 bytes is fatal. The
+/// key encrypts provider keys at rest (Go DB) and decrypts them once per
+/// hot-path request inside the Rust kernel.
+const MKEK_ENV: &str = "PINGO_MKEK";
 /// Default gRPC listen address when `--grpc-addr` is not given (platform mode).
 const DEFAULT_GRPC_ADDR: &str = "127.0.0.1:9091";
 
@@ -136,10 +141,11 @@ fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
     server.run_forever()
 }
 
-/// Platform mode (S1 stub): start the gRPC server (mTLS + internal token) that
-/// accepts snapshot pushes from the Go control plane. S1 does not run the
-/// Pingora data plane in this mode - the stub only proves connectivity (T11).
-/// S2+ will run both the gRPC server and the data plane.
+/// Platform mode: start the gRPC server (mTLS + internal token) that accepts
+/// snapshot pushes + KeyVault Encrypt/Decrypt calls from the Go control plane.
+/// S2 ships the real AES-GCM KeyVault (loaded from `PINGO_MKEK`); the snapshot
+/// and data-plane services remain stubs. S3+ will run both the gRPC server and
+/// the Pingora data plane.
 fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     // rustls 0.23 requires a process-wide CryptoProvider. Install the `ring`
     // provider before tonic's TLS stack touches rustls. Safe to call once at
@@ -166,6 +172,18 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| format!("{GRPC_CA_ENV} is required in platform mode"))?,
     );
 
+    // Load the 32-byte master key (PINGO_MKEK) for the AES-GCM KeyVault.
+    // Missing or wrong length is fatal: without a valid MKEK the kernel cannot
+    // decrypt provider keys for the hot path (constitution XX). No secret
+    // material is included in the error value.
+    let mkek = load_master_key()?;
+
+    // Construct the AES-GCM KeyVault + gRPC service. The same keyvault instance
+    // is shared (via Arc) between the gRPC control-plane service and, from S3,
+    // the hot-path KeyVault trait wrapper.
+    let keyvault = Arc::new(pingogate_keyvault::AesGcmKeyVault::from_master_key(&mkek));
+    let keyvault_service = pingogate_keyvault::KeyVaultGrpcService::new(keyvault);
+
     let addr_str = grpc_addr_from_args();
     let addr = SocketAddr::from_str(&addr_str)
         .map_err(|e| format!("invalid gRPC address '{addr_str}': {e}"))?;
@@ -179,6 +197,7 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
         server_key,
         client_ca,
         internal_token,
+        keyvault_service,
     ))?;
     Ok(())
 }
@@ -223,6 +242,27 @@ fn read_admin_token() -> Option<SecretString> {
         Ok(value) if !value.is_empty() => Some(SecretString::new(value)),
         _ => None,
     }
+}
+
+/// Load the 32-byte AES-GCM master key (`PINGO_MKEK`) from the environment
+/// (platform mode). The env var's UTF-8 bytes are taken as the raw 32-byte key;
+/// missing, empty, or not exactly 32 bytes is fatal. The error message carries
+/// no secret material (constitution XX).
+fn load_master_key() -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    let raw = std::env::var(MKEK_ENV).map_err(|_| {
+        format!("{MKEK_ENV} is required in platform mode (32-byte AES-GCM master key)")
+    })?;
+    let bytes = raw.into_bytes();
+    if bytes.len() != 32 {
+        return Err(format!(
+            "{MKEK_ENV} must be exactly 32 bytes, got {} bytes",
+            bytes.len()
+        )
+        .into());
+    }
+    let mut mkek = [0u8; 32];
+    mkek.copy_from_slice(&bytes);
+    Ok(mkek)
 }
 
 /// Initialize structured logging, honoring `RUST_LOG` and defaulting to `info`.

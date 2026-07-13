@@ -8,4 +8,5 @@ edition.workspace = true
 [dependencies]
 pingogate-core-types = { path = "../core" }
 pingogate-snapshot = { path = "../snapshot" }
+pingogate-keyvault = { path = "../keyvault" }
 thiserror = { workspace = true }

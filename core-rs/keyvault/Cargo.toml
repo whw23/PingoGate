@@ -1,0 +1,18 @@
+# core-rs/keyvault/Cargo.toml
+[package]
+name = "pingogate-keyvault"
+description = "AES-GCM provider-key encryption/decryption + gRPC KeyVaultService server (constitution XX security core)."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

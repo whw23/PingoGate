@@ -1,14 +1,14 @@
-//! PingoGate gRPC server (S1 stub).
+//! PingoGate gRPC server (S2: KeyVault real, others stubbed).
 //!
 //! Platform-mode Rust kernel listens on 127.0.0.1 for the Go control plane.
 //! Transport is mTLS (mutual cert verification) and every call must carry the
 //! shared `x-internal-token` metadata (spec §12A), enforced by
 //! [`grpc_auth::InternalTokenInterceptor`].
 //!
-//! S1 returns empty `Ack`/`HeartbeatResponse`/`HealthResponse` stubs; S2
-//! implements real snapshot application, S3 adds KeyVault AES-GCM and usage
-//! reporting. The stubs are sufficient to prove Go -> Rust connectivity with
-//! an empty snapshot push (T11).
+//! S2 implements the real `KeyVaultService` (AES-GCM Encrypt/Decrypt via
+//! [`KeyVaultGrpcService`], backed by `PINGO_MKEK`); `SnapshotService` /
+//! `UsageService` / `HealthService` remain stubs pending S2 snapshot
+//! application and S3 usage reporting.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -26,11 +26,13 @@ pub mod pingogate {
 
 use pingogate::{
     health_service_server::{HealthService, HealthServiceServer},
-    key_vault_service_server::{KeyVaultService, KeyVaultServiceServer},
     snapshot_service_server::{SnapshotService, SnapshotServiceServer},
     usage_service_server::{UsageService, UsageServiceServer},
-    Ack, DecryptRequest, DecryptResponse, EncryptRequest, EncryptResponse, HealthRequest,
-    HealthResponse, HeartbeatRequest, HeartbeatResponse, PushDeltaRequest, Snapshot, UsageEvent,
+    Ack, HealthRequest, HealthResponse, HeartbeatRequest, HeartbeatResponse, PushDeltaRequest,
+    Snapshot, UsageEvent,
+};
+use pingogate_keyvault::{
+    proto::key_vault_service_server::KeyVaultServiceServer, KeyVaultGrpcService,
 };
 
 /// S1 stub: accepts snapshot streams, returns Ack without applying.
@@ -92,32 +94,6 @@ impl SnapshotService for SnapshotServiceImpl {
     }
 }
 
-/// S1 stub: KeyVault decrypt/encrypt return NotImplemented.
-pub struct KeyVaultServiceImpl;
-
-#[tonic::async_trait]
-impl KeyVaultService for KeyVaultServiceImpl {
-    async fn encrypt(
-        &self,
-        _req: Request<EncryptRequest>,
-    ) -> Result<Response<EncryptResponse>, Status> {
-        Ok(Response::new(EncryptResponse {
-            ciphertext: Vec::new(),
-            error: "KeyVault not implemented in S1".to_string(),
-        }))
-    }
-
-    async fn decrypt(
-        &self,
-        _req: Request<DecryptRequest>,
-    ) -> Result<Response<DecryptResponse>, Status> {
-        Ok(Response::new(DecryptResponse {
-            plaintext: Vec::new(),
-            error: "KeyVault not implemented in S1".to_string(),
-        }))
-    }
-}
-
 /// S1 stub: usage report drains the stream and returns Ack.
 pub struct UsageServiceImpl;
 
@@ -156,6 +132,9 @@ impl HealthService for HealthServiceImpl {
 /// Load the server identity (cert+key) and client CA from disk, bind mTLS +
 /// token interceptor, and serve all four gRPC services on `addr`.
 ///
+/// `keyvault_service` is the real S2 AES-GCM KeyVault (constructed in `main`
+/// from `PINGO_MKEK`); the other three services are still S1 stubs.
+///
 /// Blocks until the server is shut down. The caller is expected to run this on
 /// a dedicated Tokio runtime (platform mode).
 pub async fn serve_grpc(
@@ -164,6 +143,7 @@ pub async fn serve_grpc(
     server_key_path: PathBuf,
     client_ca_path: PathBuf,
     internal_token: String,
+    keyvault_service: KeyVaultGrpcService,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let cert_pem = std::fs::read(&server_cert_path).map_err(|e| {
         format!(
@@ -199,7 +179,7 @@ pub async fn serve_grpc(
         .tls_config(tls)?
         .layer(interceptor_layer(interceptor))
         .add_service(SnapshotServiceServer::new(SnapshotServiceImpl))
-        .add_service(KeyVaultServiceServer::new(KeyVaultServiceImpl))
+        .add_service(KeyVaultServiceServer::new(keyvault_service))
         .add_service(UsageServiceServer::new(UsageServiceImpl))
         .add_service(HealthServiceServer::new(HealthServiceImpl))
         .serve(addr)

@@ -16,6 +16,6 @@ pub mod keyvault;
 pub mod secret;
 pub mod snapshot_source;
 
-pub use keyvault::{KeyError, KeyVault, StubKeyVault};
+pub use keyvault::{AesGcmKeyVault, KeyError, KeyVault, StubKeyVault};
 pub use secret::{EnvSecretResolver, SecretError, SecretResolver};
 pub use snapshot_source::{FileSnapshotSource, SnapshotError, SnapshotSource};

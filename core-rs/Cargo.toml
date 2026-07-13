@@ -10,6 +10,7 @@ members = [
     "provider",
     "pipeline",
     "listener",
+    "keyvault",
     "pingogate-core",
 ]
 
@@ -43,3 +44,7 @@ async-trait = "0.1"
 subtle = "2"
 # Lightweight percent-encoding for upstream URL query values.
 percent-encoding = "2"
+# AES-GCM provider-key encryption (constitution XX KeyVault security core).
+aes-gcm = "0.10"
+# CSPRNG for AES-GCM nonces (random 12-byte nonce per encryption, anti-reuse).
+rand = "0.8"

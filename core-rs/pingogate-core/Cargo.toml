@@ -19,6 +19,7 @@ pingogate-snapshot = { path = "../snapshot" }
 pingogate-pipeline = { path = "../pipeline" }
 pingogate-listener = { path = "../listener" }
 pingogate-storage = { path = "../storage" }
+pingogate-keyvault = { path = "../keyvault" }
 pingora = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
