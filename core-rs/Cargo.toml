@@ -19,9 +19,11 @@ edition = "2021"
 rust-version = "1.75"
 
 [workspace.dependencies]
-pingora = "0.8"
-pingora-proxy = "0.8"
-pingora-core = "0.8"
+# Pingora hot path: rustls backend avoids openssl/boringssl system toolchain
+# (pure-Rust TLS, aligns with Safe Rust constitution III). `proxy` feature
+# re-exports `pingora::proxy::ProxyHttp`; default-features = false drops the
+# zlib-ng cmake dependency.
+pingora = { version = "0.8", default-features = false, features = ["proxy", "rustls"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -32,7 +34,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1"
 prometheus = "0.13"
 bytes = "1"
-http = "0.2"
+http = "1"
 tonic = "0.10"
 prost = "0.12"
 tonic-build = "0.10"
+async-trait = "0.1"

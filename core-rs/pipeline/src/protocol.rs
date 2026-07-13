@@ -11,7 +11,10 @@
 //! A recognized-but-unsupported capability surface (Realtime/Embeddings/Batch)
 //! is reported distinctly from a wholly unidentified request, so the former can
 //! mirror the provider's native error shape while the latter falls back to
-//! PingoGate-native.
+//! PingoGate-native. The `protocol` field on `UnsupportedCapability` records
+//! which provider namespace the surface belongs to, so error rendering can pick
+//! the correct native shape (carry-over fix from T7: T7 dropped this field,
+//! T8's error mirroring needs it).
 
 use pingogate_core_types::ProtocolKind;
 
@@ -33,8 +36,9 @@ pub enum Detection {
     Supported(Detected),
     /// A recognized provider surface but an unsupported capability family
     /// (Realtime/Embeddings/Batch…); short-circuit with an explicit error in
-    /// the provider's native shape.
+    /// `protocol`'s native shape.
     UnsupportedCapability {
+        protocol: ProtocolKind,
         family: String,
     },
     /// No known provider-native shape; PingoGate-native error.
@@ -85,8 +89,8 @@ pub fn detect(method: &str, path: &str) -> Detection {
     }
 
     // Recognized-but-unsupported capability families
-    if let Some(family) = unsupported_family(path) {
-        return Detection::UnsupportedCapability { family };
+    if let Some((protocol, family)) = unsupported_family(path) {
+        return Detection::UnsupportedCapability { protocol, family };
     }
 
     Detection::Unidentified
@@ -99,19 +103,22 @@ fn supported(protocol: ProtocolKind, streaming_by_path: bool) -> Detection {
     })
 }
 
-/// Recognize provider surfaces that are out of scope this phase.
-fn unsupported_family(path: &str) -> Option<String> {
+/// Recognize provider surfaces that are out of scope this phase. Returns the
+/// provider namespace (for error-shape selection) and the capability family.
+fn unsupported_family(path: &str) -> Option<(ProtocolKind, String)> {
+    // OpenAI-namespace unsupported surfaces
     if path.ends_with("/realtime") {
-        return Some("realtime.live".into());
+        return Some((ProtocolKind::OpenAiCompatible, "realtime.live".into()));
     }
     if path.ends_with("/embeddings") {
-        return Some("embedding".into());
+        return Some((ProtocolKind::OpenAiCompatible, "embedding".into()));
     }
     if path.ends_with("/batches") {
-        return Some("batch".into());
+        return Some((ProtocolKind::OpenAiCompatible, "batch".into()));
     }
+    // Gemini-namespace unsupported surfaces
     if path.contains(":countTokens") {
-        return Some("platform.admin".into());
+        return Some((ProtocolKind::Gemini, "platform.admin".into()));
     }
     None
 }
@@ -165,6 +172,24 @@ mod tests {
     #[test]
     fn unsupported_capability_for_realtime() {
         let d = detect("POST", "/v1/realtime");
-        assert!(matches!(d, Detection::UnsupportedCapability { .. }));
+        assert!(matches!(
+            d,
+            Detection::UnsupportedCapability {
+                protocol: ProtocolKind::OpenAiCompatible,
+                family,
+            } if family == "realtime.live"
+        ));
+    }
+
+    #[test]
+    fn unsupported_capability_count_tokens_is_gemini() {
+        let d = detect("POST", "/v1beta/models/gemini-1.5-pro:countTokens");
+        assert!(matches!(
+            d,
+            Detection::UnsupportedCapability {
+                protocol: ProtocolKind::Gemini,
+                family,
+            } if family == "platform.admin"
+        ));
     }
 }
