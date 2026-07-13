@@ -1,5 +1,11 @@
 # core-rs/provider/Cargo.toml
 [package]
 name = "pingogate-provider"
+description = "Provider namespace layer: six-interface adapter, auth descriptors, error renderers, usage extraction."
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+pingogate-core-types = { path = "../core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
