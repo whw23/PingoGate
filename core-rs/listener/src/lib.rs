@@ -17,18 +17,28 @@ mod admin;
 
 pub use admin::{build_admin_service, AdminServiceConfig, Reloader, ReloadStatusStore};
 
+/// Configuration for the public data-plane service, bundled to keep the factory
+/// within the parameter limit (constitution V). Mirrors [`AdminServiceConfig`].
+/// `conf` is borrowed from the Pingora `Server` that owns the configuration.
+pub struct PublicServiceConfig<'a> {
+    pub conf: &'a Arc<ServerConf>,
+    pub holder: Arc<SnapshotHolder>,
+    pub metrics: Arc<Metrics>,
+    pub auth: Arc<dyn KeyAuth>,
+    pub address: &'a str,
+}
+
 /// Build the public data-plane service: a Pingora `HttpProxy` running the
 /// gateway pipeline, bound to `address`. The shared `metrics` registry is the
 /// same instance the Admin API renders at `/metrics`, so data-plane records are
 /// visible to the control plane.
 pub fn build_public_service(
-    conf: &Arc<ServerConf>,
-    holder: Arc<SnapshotHolder>,
-    metrics: Arc<Metrics>,
-    auth: Arc<dyn KeyAuth>,
-    address: &str,
+    config: PublicServiceConfig<'_>,
 ) -> Service<HttpProxy<GatewayProxy, ()>> {
-    let mut service = http_proxy_service(conf, GatewayProxy::new(holder, metrics, auth));
-    service.add_tcp(address);
+    let mut service = http_proxy_service(
+        config.conf,
+        GatewayProxy::new(config.holder, config.metrics, config.auth),
+    );
+    service.add_tcp(config.address);
     service
 }

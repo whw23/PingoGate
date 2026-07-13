@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pingogate_core_types::SecretString;
-use pingogate_listener::{build_admin_service, build_public_service, AdminServiceConfig};
+use pingogate_listener::{
+    build_admin_service, build_public_service, AdminServiceConfig, PublicServiceConfig,
+};
 use pingogate_pipeline::{Metrics, StaticKeyAuth};
 use pingogate_snapshot::{GatewayConfig, SnapshotHolder};
 use pingogate_storage::{FileSnapshotSource, SnapshotSource};
@@ -85,13 +87,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let metrics = Arc::new(Metrics::new());
     let auth: Arc<dyn pingogate_pipeline::KeyAuth> = Arc::new(StaticKeyAuth);
 
-    let public = build_public_service(
-        &server.configuration,
-        holder.clone(),
-        metrics.clone(),
+    let public = build_public_service(PublicServiceConfig {
+        conf: &server.configuration,
+        holder: holder.clone(),
+        metrics: metrics.clone(),
         auth,
-        &public_addr,
-    );
+        address: &public_addr,
+    });
     let admin = build_admin_service(AdminServiceConfig {
         admin_token,
         holder,
