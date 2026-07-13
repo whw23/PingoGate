@@ -195,6 +195,7 @@ edition.workspace = true
 
 [dependencies]
 aes-gcm = { workspace = true }
+rand = "0.8"
 pingogate-core = { path = "../core" }
 pingogate-storage = { path = "../storage" }
 tonic = { workspace = true }
@@ -209,6 +210,7 @@ thiserror = "1"
 // core-rs/keyvault/src/crypto.rs
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use aes_gcm::aead::{Aead, KeyInit};
+use rand::RngCore;
 
 pub struct AesGcmKeyVault {
     cipher: Aes256Gcm,
@@ -221,13 +223,24 @@ impl AesGcmKeyVault {
     }
 
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, KeyError> {
-        let nonce = Nonce::from_slice(&[0u8; 12]);  // 注:S2 固定 nonce(简化),S3 改随机 nonce 存密文前缀
-        self.cipher.encrypt(nonce, plaintext).map_err(|_| KeyError::EncryptFailed)
+        // 随机 nonce(12 字节),前缀到密文:ct = nonce || ciphertext
+        // AES-GCM 固定 nonce + 同 key = nonce 重用灾难,必须随机
+        let mut nonce_bytes = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ct = self.cipher.encrypt(nonce, plaintext).map_err(|_| KeyError::EncryptFailed)?;
+        let mut out = Vec::with_capacity(12 + ct.len());
+        out.extend_from_slice(&nonce_bytes);
+        out.extend_from_slice(&ct);
+        Ok(out)
     }
 
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, KeyError> {
-        let nonce = Nonce::from_slice(&[0u8; 12]);
-        self.cipher.decrypt(nonce, ciphertext).map_err(|_| KeyError::DecryptFailed)
+        // 读前 12 字节作 nonce,余下作 ciphertext
+        if ciphertext.len() < 12 { return Err(KeyError::DecryptFailed); }
+        let (nonce_bytes, ct) = ciphertext.split_at(12);
+        let nonce = Nonce::from_slice(nonce_bytes);
+        self.cipher.decrypt(nonce, ct).map_err(|_| KeyError::DecryptFailed)
     }
 }
 ```
@@ -254,6 +267,18 @@ mod tests {
         let kv2 = AesGcmKeyVault::from_master_key(&[2u8; 32]);
         let ct = kv1.encrypt(b"secret").unwrap();
         assert!(kv2.decrypt(&ct).is_err());
+    }
+
+    #[test]
+    fn nonce_is_random_no_reuse() {
+        // 同明文加密两次,密文不同(nonce 随机,防 nonce 重用)
+        let kv = AesGcmKeyVault::from_master_key(&[42u8; 32]);
+        let ct1 = kv.encrypt(b"same-plaintext").unwrap();
+        let ct2 = kv.encrypt(b"same-plaintext").unwrap();
+        assert_ne!(ct1, ct2, "nonce must be random - ciphertexts must differ");
+        // 两者都能正确解密
+        assert_eq!(kv.decrypt(&ct1).unwrap(), b"same-plaintext");
+        assert_eq!(kv.decrypt(&ct2).unwrap(), b"same-plaintext");
     }
 }
 ```
