@@ -109,6 +109,10 @@ version = "0.1.0"
 [[package]]
 name = "pingogate-storage"
 version = "0.1.0"
+dependencies = [
+ "pingogate-core-types",
+ "thiserror",
+]
 
 [[package]]
 name = "pingogate-transform"
