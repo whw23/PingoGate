@@ -6,10 +6,14 @@
 //! assemble the public + admin Pingora services -> run. The Pingora server owns
 //! its own runtime, so `main` stays synchronous.
 //!
-//! Platform mode position is reserved: the same binary will accept a gRPC
-//! snapshot source in S2; S1 only runs standalone.
+//! Platform mode (S2+): `PINGO_MODE=platform` starts the gRPC server (mTLS +
+//! internal token, spec §12A) that accepts snapshot pushes from the Go control
+//! plane. S1 only ships a stub server to prove connectivity (T11); real
+//! snapshot application lands in S2.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +27,8 @@ use pingogate_storage::{FileSnapshotSource, SnapshotSource};
 use pingora::server::Server;
 use tracing_subscriber::EnvFilter;
 
+mod grpc;
+mod grpc_auth;
 mod signal;
 mod watch;
 
@@ -32,6 +38,19 @@ const DEFAULT_CONFIG_PATH: &str = "pingogate-core.yaml";
 const ADMIN_TOKEN_ENV: &str = "PINGO_ADMIN_TOKEN";
 /// Opt-in file-watch interval, in seconds.
 const WATCH_INTERVAL_ENV: &str = "PINGO_WATCH_INTERVAL_SECS";
+/// Env var selecting standalone vs platform bootstrap (`standalone` | `platform`).
+const MODE_ENV: &str = "PINGO_MODE";
+/// Env var holding the shared gRPC internal token (spec §12A). Required in
+/// platform mode; fatal if missing.
+const INTERNAL_TOKEN_ENV: &str = "PINGO_INTERNAL_TOKEN";
+/// Env var: path to the server (Rust) TLS certificate PEM (platform mode).
+const GRPC_CERT_ENV: &str = "PINGO_GRPC_CERT";
+/// Env var: path to the server (Rust) TLS private key PEM (platform mode).
+const GRPC_KEY_ENV: &str = "PINGO_GRPC_KEY";
+/// Env var: path to the CA certificate PEM that signed the Go client cert.
+const GRPC_CA_ENV: &str = "PINGO_GRPC_CA";
+/// Default gRPC listen address when `--grpc-addr` is not given (platform mode).
+const DEFAULT_GRPC_ADDR: &str = "127.0.0.1:9091";
 
 fn main() {
     init_tracing();
@@ -44,6 +63,15 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mode = std::env::var(MODE_ENV).unwrap_or_else(|_| "standalone".to_string());
+    match mode.as_str() {
+        "platform" => run_platform(),
+        _ => run_standalone(),
+    }
+}
+
+/// Standalone mode: Pingora data plane + admin API, config from local YAML.
+fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = config_path_from_args();
 
     // Build the initial snapshot via FileSnapshotSource (T4 abstraction).
@@ -108,6 +136,53 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     server.run_forever()
 }
 
+/// Platform mode (S1 stub): start the gRPC server (mTLS + internal token) that
+/// accepts snapshot pushes from the Go control plane. S1 does not run the
+/// Pingora data plane in this mode - the stub only proves connectivity (T11).
+/// S2+ will run both the gRPC server and the data plane.
+fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
+    // rustls 0.23 requires a process-wide CryptoProvider. Install the `ring`
+    // provider before tonic's TLS stack touches rustls. Safe to call once at
+    // startup; a second install returns Err which we ignore (idempotent intent).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let internal_token = std::env::var(INTERNAL_TOKEN_ENV).map_err(|_| {
+        format!("{INTERNAL_TOKEN_ENV} is required in platform mode (spec §12B)")
+    })?;
+    if internal_token.is_empty() {
+        return Err(format!("{INTERNAL_TOKEN_ENV} must not be empty").into());
+    }
+
+    let server_cert = PathBuf::from(
+        std::env::var(GRPC_CERT_ENV)
+            .map_err(|_| format!("{GRPC_CERT_ENV} is required in platform mode"))?,
+    );
+    let server_key = PathBuf::from(
+        std::env::var(GRPC_KEY_ENV)
+            .map_err(|_| format!("{GRPC_KEY_ENV} is required in platform mode"))?,
+    );
+    let client_ca = PathBuf::from(
+        std::env::var(GRPC_CA_ENV)
+            .map_err(|_| format!("{GRPC_CA_ENV} is required in platform mode"))?,
+    );
+
+    let addr_str = grpc_addr_from_args();
+    let addr = SocketAddr::from_str(&addr_str)
+        .map_err(|e| format!("invalid gRPC address '{addr_str}': {e}"))?;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(grpc::serve_grpc(
+        addr,
+        server_cert,
+        server_key,
+        client_ca,
+        internal_token,
+    ))?;
+    Ok(())
+}
+
 /// Resolve the config path from `--config <path>` / `--config=<path>`, defaulting
 /// to `pingogate-core.yaml` in the working directory.
 fn config_path_from_args() -> String {
@@ -122,6 +197,23 @@ fn config_path_from_args() -> String {
         }
     }
     DEFAULT_CONFIG_PATH.to_string()
+}
+
+/// Resolve the gRPC listen address from `--grpc-addr <addr>` /
+/// `--grpc-addr=<addr>`, defaulting to `127.0.0.1:9091` (spec §12A: loopback
+/// only). Used in platform mode.
+fn grpc_addr_from_args() -> String {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--grpc-addr" {
+            if let Some(addr) = args.next() {
+                return addr;
+            }
+        } else if let Some(addr) = arg.strip_prefix("--grpc-addr=") {
+            return addr.to_string();
+        }
+    }
+    DEFAULT_GRPC_ADDR.to_string()
 }
 
 /// Read the admin token from the environment (R1). Returns `None` when unset or
