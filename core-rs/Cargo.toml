@@ -29,6 +29,7 @@ serde_yaml = "0.9"
 arc-swap = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
 prometheus = "0.13"
 bytes = "1"
 http = "0.2"

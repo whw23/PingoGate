@@ -1,9 +1,15 @@
 # core-rs/core/Cargo.toml
 [package]
 name = "pingogate-core-types"
+description = "Shared domain types, errors, and auth boundary for PingoGate."
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
