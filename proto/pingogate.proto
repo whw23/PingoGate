@@ -1,0 +1,89 @@
+// proto/pingogate.proto
+syntax = "proto3";
+package pingogate;
+option go_package = "github.com/whw23/pingogate/ctrl-go/internal/proto;pingogatepb";
+
+// 所有服务:调用方经 gRPC metadata 携带 x-internal-token(spec §12A);
+// 传输经 mTLS(Rust/Go 互验证书,仅 127.0.0.1)。
+
+// SnapshotService: Go -> Rust 推送运行时快照(S1 骨架,S2 实现)
+service SnapshotService {
+  rpc PushSnapshot(stream Snapshot) returns (Ack);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // 预留:增量推送(S2/S3 不实现,转增量触发条件见 spec §12C)
+  rpc PushDelta(stream PushDeltaRequest) returns (Ack);
+}
+
+// KeyVaultService: Go -> Rust 加解密(S1 骨架,S2 实现加密)
+service KeyVaultService {
+  rpc Encrypt(EncryptRequest) returns (EncryptResponse);
+  rpc Decrypt(DecryptRequest) returns (DecryptResponse);
+}
+
+// UsageService: Rust -> Go 推 usage 事件(S1 骨架,S3 实现)
+service UsageService {
+  rpc ReportUsage(stream UsageEvent) returns (Ack);
+}
+
+// HealthService: 双向心跳 + Rust 报告当前快照 version(spec §3.3/§12C 恢复)
+service HealthService {
+  rpc Check(HealthRequest) returns (HealthResponse);
+}
+
+message Snapshot {
+  uint64 version = 1;
+  bytes payload = 2;  // S1 占位;S2 扩展
+}
+
+message Ack {
+  uint64 version = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+// 预留:增量推送(S2/S3 不实现)
+message PushDeltaRequest {
+  uint64 from_version = 1;
+  uint64 to_version = 2;
+  // S2/S3 不填;转增量时扩展 added/modified/removed
+}
+
+message HeartbeatRequest {
+  uint64 current_version = 1;
+  bool ready = 2;
+}
+message HeartbeatResponse {
+  bool acknowledged = 1;
+}
+
+message HealthRequest {
+  uint64 current_version = 1;  // Rust 报告当前快照 version
+}
+message HealthResponse {
+  bool ready = 1;              // Rust 是否 ready(收到首个全量快照后)
+  uint64 version = 2;
+}
+
+message EncryptRequest {
+  bytes plaintext = 1;
+}
+message EncryptResponse {
+  bytes ciphertext = 1;
+  string error = 2;
+}
+
+message DecryptRequest {
+  bytes ciphertext = 1;
+  string requester_user_id = 2;  // S3 双防线用
+  string key_id = 3;
+  string intent = 4;  // view_plaintext | hot_path_inject
+}
+message DecryptResponse {
+  bytes plaintext = 1;
+  string error = 2;
+}
+
+message UsageEvent {
+  uint64 version = 1;
+  bytes payload = 2;  // S3 扩展为结构化 usage
+}
