@@ -27,9 +27,17 @@ pub struct ResolvedProvider {
     pub kind: ProviderKind,
     pub base_url: String,
     pub auth_method: AuthMethod,
-    /// Standalone mode: env-resolved plaintext. Platform mode (S2): ciphertext
-    /// decrypted once per request by KeyVault into this same `SecretString`.
+    /// Standalone mode: env-resolved plaintext (set at build time). Platform
+    /// mode: empty placeholder - the hot path decrypts `encrypted_key` per
+    /// request via the KeyVault into a transient `SecretString` (constitution XX:
+    /// "明文仅在 `KeyVault::decrypt()` 返回的 `SecretString` 中存活").
     pub key: SecretString,
+    /// Platform mode only: AES-GCM ciphertext of the provider key (`nonce ||
+    /// ciphertext`, 12-byte random nonce prefix). `None` in standalone mode.
+    /// The Go control plane pushes this; the Rust kernel decrypts once per
+    /// hot-path request. Ciphertext is arbitrary bytes (not UTF-8), so it lives
+    /// here as `Vec<u8>` rather than in `key: SecretString`.
+    pub encrypted_key: Option<Vec<u8>>,
     pub anthropic_version: Option<String>,
     pub capability_families: Vec<CapabilityFamily>,
 }
@@ -146,6 +154,7 @@ fn resolve_providers(
             base_url: p.base_url.clone(),
             auth_method: map_auth(p.auth.method),
             key,
+            encrypted_key: None,
             anthropic_version: p.anthropic_version.clone(),
             capability_families: p.capability_families.clone(),
         });
@@ -185,6 +194,24 @@ impl SnapshotHolder {
     pub fn new(initial: Arc<RuntimeSnapshot>) -> Self {
         Self {
             inner: ArcSwap::from(initial),
+        }
+    }
+
+    /// Create a holder with an empty version-0 snapshot (platform mode). The
+    /// holder is "not ready" until the Go control plane pushes the first real
+    /// snapshot via gRPC and `store` swaps it in (spec §12B: readyz not-ready
+    /// until first snapshot). `version == 0` is the sentinel for "no snapshot
+    /// applied yet"; [`HealthService`](../grpc/struct.HealthServiceImpl.html)
+    /// reports `ready: false` while it sees version 0.
+    pub fn empty() -> Self {
+        Self {
+            inner: ArcSwap::from(Arc::new(RuntimeSnapshot {
+                version: 0,
+                providers: Vec::new(),
+                routes: Vec::new(),
+                gateway_keys: Vec::new(),
+                upstream: UpstreamConfig { timeout_ms: 60_000 },
+            })),
         }
     }
 

@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pingogate_snapshot::{ConfigError, GatewayConfig, RuntimeSnapshot};
+use pingogate_snapshot::{ConfigError, GatewayConfig, RuntimeSnapshot, SnapshotHolder};
 
 use crate::secret::EnvSecretResolver;
 
@@ -77,6 +77,59 @@ impl SnapshotSource for FileSnapshotSource {
         // eagerly so a missing key fails the build, not a live request (FR-022).
         let snapshot = RuntimeSnapshot::build(&config, &EnvSecretResolver, version)?;
         Ok(snapshot)
+    }
+}
+
+/// Platform-mode snapshot source backed by a [`SnapshotHolder`].
+///
+/// The Go control plane pushes proto `Snapshot` messages over gRPC; the binary
+/// crate (`pingogate-core::grpc`) converts each proto message into a
+/// [`RuntimeSnapshot`] (providers carry AES-GCM **ciphertext** in
+/// [`ResolvedProvider::encrypted_key`], not plaintext) and calls [`apply`]
+/// to atomically swap it into the holder (constitution XII: `ArcSwap`).
+///
+/// This struct is deliberately proto-agnostic: it only holds the holder and
+/// exposes [`apply`] to store a pre-built snapshot. The proto -> RuntimeSnapshot
+/// conversion lives in the binary crate (which owns the tonic codegen), keeping
+/// `pingogate-storage` free of protobuf dependencies (constitution VIII).
+///
+/// [`apply`]: GrpcSnapshotSource::apply
+pub struct GrpcSnapshotSource {
+    holder: Arc<SnapshotHolder>,
+}
+
+impl GrpcSnapshotSource {
+    /// Wrap a [`SnapshotHolder`] (typically constructed via
+    /// [`SnapshotHolder::empty`] in platform mode) so the gRPC layer can swap
+    /// snapshots into it.
+    pub fn new(holder: Arc<SnapshotHolder>) -> Self {
+        Self { holder }
+    }
+
+    /// Read-only access to the underlying holder (e.g. for the health service
+    /// to report the active version).
+    pub fn holder(&self) -> &Arc<SnapshotHolder> {
+        &self.holder
+    }
+
+    /// Atomically install `snapshot` as the active runtime snapshot
+    /// (constitution XII: in-flight requests keep using the old `Arc`). The
+    /// caller is responsible for proto -> RuntimeSnapshot conversion and
+    /// semantic validation before calling this.
+    pub fn apply(&self, snapshot: Arc<RuntimeSnapshot>) {
+        self.holder.store(snapshot);
+    }
+}
+
+impl SnapshotSource for GrpcSnapshotSource {
+    type Snapshot = RuntimeSnapshot;
+
+    /// Platform mode: the snapshot is built off-band by the gRPC layer and
+    /// stored in the holder. `build_snapshot` simply returns the current
+    /// active snapshot; `version` is accepted for trait conformance but the
+    /// caller should read `holder.load().version` for the authoritative value.
+    fn build_snapshot(&self, _version: u64) -> Result<Arc<RuntimeSnapshot>, SnapshotError> {
+        Ok(self.holder.load_full())
     }
 }
 

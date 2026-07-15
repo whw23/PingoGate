@@ -143,9 +143,11 @@ fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Platform mode: start the gRPC server (mTLS + internal token) that accepts
 /// snapshot pushes + KeyVault Encrypt/Decrypt calls from the Go control plane.
-/// S2 ships the real AES-GCM KeyVault (loaded from `PINGO_MKEK`); the snapshot
-/// and data-plane services remain stubs. S3+ will run both the gRPC server and
-/// the Pingora data plane.
+/// S2 ships the real AES-GCM KeyVault (loaded from `PINGO_MKEK`) and the real
+/// `SnapshotService` (proto `Snapshot` -> `RuntimeSnapshot` -> `ArcSwap`). The
+/// `HealthService` reports `ready: false` until the first snapshot is applied
+/// (spec §12B). S3+ will also run the Pingora data plane alongside the gRPC
+/// server; S2 runs the gRPC server only.
 fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     // rustls 0.23 requires a process-wide CryptoProvider. Install the `ring`
     // provider before tonic's TLS stack touches rustls. Safe to call once at
@@ -184,6 +186,13 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     let keyvault = Arc::new(pingogate_keyvault::AesGcmKeyVault::from_master_key(&mkek));
     let keyvault_service = pingogate_keyvault::KeyVaultGrpcService::new(keyvault);
 
+    // Platform-mode snapshot source: an empty holder (version 0 sentinel) that
+    // the Go control plane fills via `PushSnapshot`. The data plane (S3+) will
+    // read from this holder; the `HealthService` reports not-ready until the
+    // first snapshot lands (spec §12B).
+    let holder = Arc::new(pingogate_snapshot::SnapshotHolder::empty());
+    let snapshot_source = Arc::new(pingogate_storage::GrpcSnapshotSource::new(holder));
+
     let addr_str = grpc_addr_from_args();
     let addr = SocketAddr::from_str(&addr_str)
         .map_err(|e| format!("invalid gRPC address '{addr_str}': {e}"))?;
@@ -198,6 +207,7 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
         client_ca,
         internal_token,
         keyvault_service,
+        snapshot_source,
     ))?;
     Ok(())
 }

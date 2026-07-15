@@ -1,4 +1,4 @@
-//! PingoGate gRPC server (S2: KeyVault real, others stubbed).
+//! PingoGate gRPC server (S2: KeyVault + Snapshot real; Usage stubbed).
 //!
 //! Platform-mode Rust kernel listens on 127.0.0.1 for the Go control plane.
 //! Transport is mTLS (mutual cert verification) and every call must carry the
@@ -6,13 +6,21 @@
 //! [`grpc_auth::InternalTokenInterceptor`].
 //!
 //! S2 implements the real `KeyVaultService` (AES-GCM Encrypt/Decrypt via
-//! [`KeyVaultGrpcService`], backed by `PINGO_MKEK`); `SnapshotService` /
-//! `UsageService` / `HealthService` remain stubs pending S2 snapshot
-//! application and S3 usage reporting.
+//! [`KeyVaultGrpcService`], backed by `PINGO_MKEK`) and the real
+//! `SnapshotService` (client-streaming `PushSnapshot` -> proto `Snapshot` ->
+//! [`RuntimeSnapshot`] -> `ArcSwap`). `UsageService` remains a stub pending S3
+//! usage reporting. `HealthService` reports the active snapshot version and
+//! `ready: false` until the first snapshot is applied (spec §12B).
+
+#[path = "grpc_convert.rs"]
+mod grpc_convert;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use pingogate_snapshot::SnapshotHolder;
+use pingogate_storage::GrpcSnapshotSource;
 use tonic::service::interceptor as interceptor_layer;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status, Streaming};
@@ -24,6 +32,7 @@ pub mod pingogate {
     include!(concat!(env!("OUT_DIR"), "/pingogate.rs"));
 }
 
+use grpc_convert::build_runtime_snapshot;
 use pingogate::{
     health_service_server::{HealthService, HealthServiceServer},
     snapshot_service_server::{SnapshotService, SnapshotServiceServer},
@@ -35,37 +44,46 @@ use pingogate_keyvault::{
     proto::key_vault_service_server::KeyVaultServiceServer, KeyVaultGrpcService,
 };
 
-/// S1 stub: accepts snapshot streams, returns Ack without applying.
-pub struct SnapshotServiceImpl;
+/// Real S2 `SnapshotService`: drains the client-streaming `PushSnapshot` flow,
+/// converts each proto `Snapshot` into a [`RuntimeSnapshot`] (providers carry
+/// AES-GCM ciphertext in `ResolvedProvider::encrypted_key`), and atomically
+/// swaps it into the [`SnapshotHolder`] via [`GrpcSnapshotSource::apply`].
+pub struct SnapshotServiceImpl {
+    source: Arc<GrpcSnapshotSource>,
+}
+
+impl SnapshotServiceImpl {
+    pub fn new(source: Arc<GrpcSnapshotSource>) -> Self {
+        Self { source }
+    }
+}
 
 #[tonic::async_trait]
 impl SnapshotService for SnapshotServiceImpl {
-    /// Client-streaming: drain the incoming `Snapshot` messages and return a
-    /// single `Ack`. S1 only logs the first version it sees; S2 will validate
-    /// and apply via `ArcSwap`.
+    /// Client-streaming: drain the incoming `Snapshot` messages, apply each via
+    /// `ArcSwap`, and return a single `Ack` with the last applied version. A
+    /// stream with zero messages is a no-op and returns `ok: true, version: 0`.
     async fn push_snapshot(
         &self,
         request: Request<Streaming<Snapshot>>,
     ) -> Result<Response<Ack>, Status> {
         let mut stream = request.into_inner();
-        let mut count = 0u32;
-        let mut first_version = 0u64;
+        let mut last_version = 0u64;
         while let Some(msg) = stream.message().await? {
-            if count == 0 {
-                first_version = msg.version;
-                tracing::info!(
-                    version = msg.version,
-                    providers = msg.providers.len(),
-                    routes = msg.routes.len(),
-                    encrypted_keys = msg.encrypted_keys.len(),
-                    "gRPC push_snapshot: first snapshot received (S1 stub, not applied)"
-                );
-            }
-            count += 1;
+            last_version = msg.version;
+            let snapshot = build_runtime_snapshot(&msg)?;
+            tracing::info!(
+                version = msg.version,
+                providers = msg.providers.len(),
+                routes = msg.routes.len(),
+                encrypted_keys = msg.encrypted_keys.len(),
+                "gRPC push_snapshot: applying snapshot"
+            );
+            self.source.apply(snapshot);
         }
-        tracing::info!(count, first_version, "gRPC push_snapshot: stream closed");
+        tracing::info!(last_version, "gRPC push_snapshot: stream closed");
         Ok(Response::new(Ack {
-            version: first_version,
+            version: last_version,
             ok: true,
             error: String::new(),
         }))
@@ -84,6 +102,9 @@ impl SnapshotService for SnapshotServiceImpl {
         &self,
         request: Request<Streaming<PushDeltaRequest>>,
     ) -> Result<Response<Ack>, Status> {
+        // Delta push is reserved (spec §12C); drain and ack. S2/S3 do not
+        // implement incremental snapshots - the Go control plane re-pushes the
+        // full snapshot when the delta trigger fires.
         let mut stream = request.into_inner();
         while stream.message().await?.is_some() {}
         Ok(Response::new(Ack {
@@ -113,8 +134,19 @@ impl UsageService for UsageServiceImpl {
     }
 }
 
-/// S1 stub: always reports ready with version 0 (no snapshot applied yet).
-pub struct HealthServiceImpl;
+/// S2 `HealthService`: reports `ready: false` until the first snapshot is
+/// applied (spec §12B). Readiness is derived from the active snapshot version:
+/// `version == 0` means the holder still holds the empty sentinel from
+/// `SnapshotHolder::empty`, i.e. no Go push has been applied yet.
+pub struct HealthServiceImpl {
+    holder: Arc<SnapshotHolder>,
+}
+
+impl HealthServiceImpl {
+    pub fn new(holder: Arc<SnapshotHolder>) -> Self {
+        Self { holder }
+    }
+}
 
 #[tonic::async_trait]
 impl HealthService for HealthServiceImpl {
@@ -122,9 +154,11 @@ impl HealthService for HealthServiceImpl {
         &self,
         _req: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
+        let snap = self.holder.load();
+        let ready = snap.version > 0;
         Ok(Response::new(HealthResponse {
-            ready: false,
-            version: 0,
+            ready,
+            version: snap.version,
         }))
     }
 }
@@ -133,7 +167,9 @@ impl HealthService for HealthServiceImpl {
 /// token interceptor, and serve all four gRPC services on `addr`.
 ///
 /// `keyvault_service` is the real S2 AES-GCM KeyVault (constructed in `main`
-/// from `PINGO_MKEK`); the other three services are still S1 stubs.
+/// from `PINGO_MKEK`). `snapshot_source` carries the [`SnapshotHolder`] that
+/// the `SnapshotService` swaps into and the `HealthService` reads from.
+/// `UsageService` remains an S1 stub (S3).
 ///
 /// Blocks until the server is shut down. The caller is expected to run this on
 /// a dedicated Tokio runtime (platform mode).
@@ -144,6 +180,7 @@ pub async fn serve_grpc(
     client_ca_path: PathBuf,
     internal_token: String,
     keyvault_service: KeyVaultGrpcService,
+    snapshot_source: Arc<GrpcSnapshotSource>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let cert_pem = std::fs::read(&server_cert_path).map_err(|e| {
         format!(
@@ -173,17 +210,24 @@ pub async fn serve_grpc(
 
     let interceptor = InternalTokenInterceptor::new(internal_token);
 
+    let holder = snapshot_source.holder().clone();
     tracing::info!(%addr, "gRPC server starting (mTLS + internal token)");
 
     Server::builder()
         .tls_config(tls)?
         .layer(interceptor_layer(interceptor))
-        .add_service(SnapshotServiceServer::new(SnapshotServiceImpl))
+        .add_service(SnapshotServiceServer::new(SnapshotServiceImpl::new(
+            snapshot_source,
+        )))
         .add_service(KeyVaultServiceServer::new(keyvault_service))
         .add_service(UsageServiceServer::new(UsageServiceImpl))
-        .add_service(HealthServiceServer::new(HealthServiceImpl))
+        .add_service(HealthServiceServer::new(HealthServiceImpl::new(holder)))
         .serve(addr)
         .await?;
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "grpc_tests.rs"]
+mod tests;
