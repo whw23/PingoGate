@@ -37,6 +37,14 @@ func Open(dsn string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: connect sqlite: %w", err)
 	}
+	// SQLite silently ignores FOREIGN KEY constraints unless this PRAGMA is set
+	// on each connection. The schema declares REFERENCES users(id) on
+	// user_provider_keys (owner_user_id, created_by); without this, orphan rows
+	// are possible and user deletion won't cascade/restrict.
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("storage: enable foreign_keys: %w", err)
+	}
 	if err := migrate(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("storage: migrate: %w", err)

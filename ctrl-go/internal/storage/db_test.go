@@ -65,4 +65,15 @@ func TestOpenAndMigrate(t *testing.T) {
 			t.Fatalf("got index name=%q, want %q", name, "idx_provider_keys_owner")
 		}
 	})
+
+	t.Run("foreign_keys_enforced_rejects_orphan_provider_key", func(t *testing.T) {
+		// PRAGMA foreign_keys=ON (set in Open) must reject a user_provider_keys
+		// row whose owner_user_id references a non-existent user.
+		_, err := db.Exec(
+			`INSERT INTO user_provider_keys (id, owner_user_id, provider_type, encrypted_key, created_by, created_at, enabled)
+			 VALUES ('pk-test', 'nonexistent-user', 'openai', x'deadbeef', 'nonexistent-user', datetime('now'), 1)`)
+		if err == nil {
+			t.Fatalf("expected FK violation inserting provider key with non-existent owner, got nil")
+		}
+	})
 }
