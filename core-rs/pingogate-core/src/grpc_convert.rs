@@ -59,6 +59,12 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
         let capability_families = parse_capability_families(&p.capability_families).map_err(|e| {
             Status::invalid_argument(format!("provider {}: {e}", p.name))
         })?;
+        if capability_families.is_empty() {
+            return Err(Status::invalid_argument(format!(
+                "provider {}: capability_families must not be empty",
+                p.name
+            )));
+        }
 
         // Resolve the encrypted key reference to ciphertext bytes.
         let ciphertext = key_map.get(p.encrypted_key_ref.as_str()).copied().ok_or_else(|| {

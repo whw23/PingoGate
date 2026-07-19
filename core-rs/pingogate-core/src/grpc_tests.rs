@@ -102,6 +102,28 @@ fn build_runtime_snapshot_rejects_anthropic_without_version() {
 }
 
 #[test]
+fn build_runtime_snapshot_rejects_empty_capability_families() {
+    use pingogate::{EncryptedProviderKey, Snapshot};
+    let mut entry = make_provider_entry("p", "openai-compatible", "bearer", "k1");
+    entry.capability_families = vec![];
+    let snap = Snapshot {
+        version: 1,
+        providers: vec![entry],
+        routes: vec![],
+        virtual_keys: vec![],
+        encrypted_keys: vec![EncryptedProviderKey {
+            id: "k1".to_string(),
+            ciphertext: vec![0u8; 24],
+            owner_user_id: "u".to_string(),
+            created_by: "u".to_string(),
+        }],
+    };
+    let err = build_runtime_snapshot(&snap).unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert!(err.message().contains("capability_families must not be empty"));
+}
+
+#[test]
 fn build_runtime_snapshot_rejects_route_to_unknown_provider() {
     use pingogate::{EncryptedProviderKey, RouteEntry, Snapshot};
     let snap = Snapshot {
