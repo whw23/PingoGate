@@ -6,21 +6,29 @@
 //
 // S2 scope (T18 brief Step 2): open the SQLite DB (T17 storage.Open) and run
 // identity.BootstrapAdmin at startup so the first start creates an initial
-// admin from PINGO_BOOTSTRAP_ADMIN_TOKEN (spec §12B). The DB and bootstrap
-// wiring are additive to the S1 gRPC flow; HTTP handlers for User CRUD are
-// deferred to T20/T21.
+// admin from PINGO_BOOTSTRAP_ADMIN_TOKEN (spec §12B).
+//
+// T20 scope: construct a snapshot.Builder + Pusher, perform the first full
+// snapshot sync to the Rust kernel at startup (spec §12B: "Rust 启动后内存快照空,
+// Go 检测到 Rust 连接后立即推全量快照"), and mount the keymgmt CRUD routes
+// with the Pusher wired in so Create/Delete triggers a gRPC push (spec §12C).
+// An HTTP server hosts the CRUD routes; the pusher is best-effort so a Rust
+// outage does not block key management.
 package main
 
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"google.golang.org/grpc"
 
 	"github.com/whw23/pingogate/ctrl-go/internal/grpcmtls"
 	"github.com/whw23/pingogate/ctrl-go/internal/identity"
+	"github.com/whw23/pingogate/ctrl-go/internal/keymgmt"
 	pb "github.com/whw23/pingogate/ctrl-go/internal/proto"
 	"github.com/whw23/pingogate/ctrl-go/internal/snapshot"
 	"github.com/whw23/pingogate/ctrl-go/internal/storage"
@@ -55,6 +63,15 @@ const dbDSNEnv = "PINGO_DB_DSN"
 // defaultDBDSN is the default SQLite file path when PINGO_DB_DSN is unset.
 const defaultDBDSN = "pingogate.db"
 
+// Env var holding the HTTP listen address for the control-plane API. Defaults
+// to :8080; production overrides via env. The listener hosts User CRUD +
+// provider-key CRUD routes (T18 + T20).
+const httpAddrEnv = "PINGO_HTTP_ADDR"
+
+// defaultHTTPAddr is the default HTTP listen address when PINGO_HTTP_ADDR is
+// unset. S2 is single-node; L4+ multi-tenant puts this behind a load balancer.
+const defaultHTTPAddr = ":8080"
+
 func main() {
 	internalToken := os.Getenv(internalTokenEnv)
 	if internalToken == "" {
@@ -85,8 +102,8 @@ func main() {
 	// without an admin the system is unadministerable.
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer bootstrapCancel()
-	store := identity.NewStore(db)
-	created, err := identity.BootstrapAdmin(bootstrapCtx, store, bootstrapToken)
+	idStore := identity.NewStore(db)
+	created, err := identity.BootstrapAdmin(bootstrapCtx, idStore, bootstrapToken)
 	if err != nil {
 		log.Fatalf("bootstrap admin: %v", err)
 	}
@@ -121,15 +138,39 @@ func main() {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Construct the KeyVault client (T19) and snapshot Builder + Pusher (T20).
+	// The Pusher owns the monotonic version counter and serializes pushes
+	// (spec §12C). The Builder reads the DB and assembles a proto Snapshot;
+	// the Pusher sends it over gRPC and advances synced_version only on a
+	// matching Ack.
+	kvClient := keymgmt.NewKeyVaultClient(pb.NewKeyVaultServiceClient(conn))
+	builder := snapshot.NewBuilder(db)
+	pusher := snapshot.NewPusher(pb.NewSnapshotServiceClient(conn), builder)
 
-	client := pb.NewSnapshotServiceClient(conn)
-	if err := snapshot.PushEmpty(ctx, client); err != nil {
-		log.Fatalf("push empty snapshot: %v", err)
+	// First full snapshot sync (spec §12B: "Rust 启动后内存快照空, Go 检测到
+	// Rust 连接后立即推全量快照"). A failure here is fatal: without the
+	// initial sync the Rust kernel stays not-ready and no traffic can flow.
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer syncCancel()
+	if err := pusher.Push(syncCtx); err != nil {
+		log.Fatalf("initial snapshot sync: %v", err)
 	}
+	log.Printf("snapshot: initial sync complete (version=%d)", pusher.SyncedVersion())
 
-	log.Println("S2: DB opened, bootstrap admin ensured, gRPC connected (mTLS + token), empty snapshot pushed")
+	// Mount the control-plane HTTP routes. AuthMiddleware runs first; each
+	// RegisterRoutes adds its own Authorize check on top. The Pusher is
+	// injected into keymgmt so Create/Delete triggers a best-effort push.
+	r := chi.NewRouter()
+	r.Use(identity.AuthMiddleware(idStore))
+	identity.RegisterRoutes(r, idStore)
+	keyStore := keymgmt.NewStore(db)
+	keymgmt.RegisterRoutes(r, keyStore, kvClient, pusher)
+
+	httpAddr := httpAddrFromEnv()
+	log.Printf("control-plane HTTP listening on %s", httpAddr)
+	if err := http.ListenAndServe(httpAddr, r); err != nil {
+		log.Fatalf("HTTP server: %v", err)
+	}
 }
 
 // grpcAddrFromEnv reads the gRPC target from PINGO_GRPC_ADDR, defaulting to
@@ -139,4 +180,13 @@ func grpcAddrFromEnv() string {
 		return addr
 	}
 	return defaultGrpcAddr
+}
+
+// httpAddrFromEnv reads the HTTP listen address from PINGO_HTTP_ADDR, defaulting
+// to :8080.
+func httpAddrFromEnv() string {
+	if addr := os.Getenv(httpAddrEnv); addr != "" {
+		return addr
+	}
+	return defaultHTTPAddr
 }
