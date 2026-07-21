@@ -49,7 +49,7 @@ func TestOpenAndMigrate(t *testing.T) {
 		if err := db.Get(&count, "SELECT COUNT(*) FROM schema_migrations"); err != nil {
 			t.Fatalf("count schema_migrations: %v", err)
 		}
-		if want := 2; count != want {
+		if want := 3; count != want {
 			t.Fatalf("schema_migrations count = %d, want %d", count, want)
 		}
 	})
