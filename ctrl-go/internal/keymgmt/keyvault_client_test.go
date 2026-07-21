@@ -40,10 +40,10 @@ func TestComputeLast4(t *testing.T) {
 		want  string
 	}{
 		{"sk-1234567890abcdef", "cdef"},
-		{"abc", "abc"},
-		{"abcd", "abcd"},
+		{"abc", "****"},  // <4: placeholder, never expose full short secret
+		{"abcd", "abcd"}, // =4: exactly 4 chars, not exposing extra
 		{"abcde", "bcde"},
-		{"", ""},
+		{"", "****"}, // empty: placeholder
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {

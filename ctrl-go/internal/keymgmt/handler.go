@@ -85,6 +85,14 @@ func createHandler(store *Store, kv KeyVaultClient) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "bad_request", "plaintext_key is required")
 			return
 		}
+		// Minimum length guard: real provider keys are far longer than 8 chars.
+		// Rejecting short values avoids storing near-useless keys AND prevents
+		// computeLast4 from exposing the full value of a short input (security
+		// review: Information Disclosure - Secret Exposure).
+		if len(req.PlaintextKey) < 8 {
+			writeError(w, http.StatusBadRequest, "bad_request", "plaintext_key too short (minimum 8 characters)")
+			return
+		}
 
 		// Encrypt the plaintext via the Rust KeyVault (gRPC). The plaintext
 		// lives only in this function stack; the returned ciphertext is
@@ -194,12 +202,13 @@ func deleteHandler(store *Store) http.HandlerFunc {
 	}
 }
 
-// computeLast4 returns the last 4 characters of s. For keys shorter than
-// 4 characters, returns the whole string. Used at Create time to capture
-// a non-sensitive preview for List/Get display (constitution XX).
+// computeLast4 returns the last 4 characters of s as a non-sensitive preview
+// for List/Get display (constitution XX). For keys shorter than 4 characters,
+// returns a placeholder ("****") rather than the full string to avoid exposing
+// a short secret in full (defense in depth; Create also enforces min length 8).
 func computeLast4(s string) string {
-	if len(s) <= 4 {
-		return s
+	if len(s) < 4 {
+		return "****"
 	}
 	return s[len(s)-4:]
 }
