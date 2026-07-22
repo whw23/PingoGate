@@ -48,6 +48,28 @@ impl From<String> for SecretString {
     }
 }
 
+impl Drop for SecretString {
+    /// Zero the plaintext bytes on drop (constitution XX: "明文请求结束清零").
+    ///
+    /// `String`'s heap bytes are normally returned to the allocator without
+    /// being wiped, leaving plaintext recoverable via heap inspection (core
+    /// dump / `/proc/<pid>/mem`). This overwrites the bytes with zeros before
+    /// the `String` is dropped.
+    fn drop(&mut self) {
+        // Zero the plaintext bytes before the String deallocates (constitution
+        // XX: "明文请求结束清零"). This is an explicit unsafe review per
+        // constitution III: we write only into the String's own valid byte
+        // buffer (no aliasing borrow outstanding; drop takes &mut self). The
+        // bytes become non-UTF-8 (zeros) but the String is about to drop and
+        // will not be re-parsed. Safe-Rust alternative as_mut_vec also requires
+        // unsafe for the same reason.
+        let bytes = unsafe { self.0.as_bytes_mut() };
+        for b in bytes {
+            *b = 0;
+        }
+    }
+}
+
 /// Errors raised while resolving an opaque secret reference to material.
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
@@ -87,5 +109,17 @@ mod tests {
         let s = SecretString::new("value");
         assert_eq!(s.expose(), "value");
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn drop_does_not_panic_and_clears_without_leak() {
+        // constitution XX: SecretString drops cleanly (zeroing in Drop impl).
+        // We cannot safely read freed heap to assert zeroing, but verify Drop
+        // runs without panic across many instances (regression for Drop impl).
+        for _ in 0..1000 {
+            let s = SecretString::new("sk-test-secret-material-for-drop");
+            assert_eq!(s.expose(), "sk-test-secret-material-for-drop");
+            // s drops here; Drop zeroes the backing buffer.
+        }
     }
 }

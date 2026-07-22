@@ -55,7 +55,7 @@ impl VirtualKeyAuth {
     /// Test-only: the hot path never reads the count after increment.
     #[cfg(test)]
     pub(crate) fn in_flight(&self, vkey_id: &str) -> i64 {
-        let map = self.concurrency.lock().expect("concurrency map poisoned");
+        let map = self.concurrency.lock().unwrap_or_else(|e| e.into_inner()); // recover from poison (no cascade)
         map.get(vkey_id)
             .map(|c| c.load(Ordering::Relaxed))
             .unwrap_or(0)
@@ -107,7 +107,7 @@ impl KeyAuth for VirtualKeyAuth {
         // 4. Concurrency quota (max_concurrency == 0 means unlimited).
         if vk.max_concurrency > 0 {
             let counter = {
-                let mut map = self.concurrency.lock().expect("concurrency map poisoned");
+                let mut map = self.concurrency.lock().unwrap_or_else(|e| e.into_inner()); // recover from poison (no cascade)
                 map.entry(vk.id.clone())
                     .or_insert_with(|| std::sync::Arc::new(AtomicI64::new(0)))
                     .clone()
@@ -126,7 +126,7 @@ impl KeyAuth for VirtualKeyAuth {
             return;
         }
         let counter = {
-            let map = self.concurrency.lock().expect("concurrency map poisoned");
+            let map = self.concurrency.lock().unwrap_or_else(|e| e.into_inner()); // recover from poison (no cascade)
             map.get(&principal.id).cloned()
         };
         if let Some(counter) = counter {
