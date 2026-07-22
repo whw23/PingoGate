@@ -21,6 +21,7 @@ pub mod router;
 pub mod streaming;
 pub mod upstream_auth;
 pub mod upstream_peer;
+pub mod virtual_key_auth;
 pub mod wire;
 
 pub use ctx::GatewayCtx;
@@ -30,3 +31,4 @@ pub use protocol::{detect, Detected, Detection};
 pub use proxy::GatewayProxy;
 pub use upstream_auth::{UpstreamAuth, GATEWAY_KEY_HEADERS};
 pub use upstream_peer::{resolve_route, UpstreamTarget};
+pub use virtual_key_auth::VirtualKeyAuth;

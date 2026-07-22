@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use pingogate_pipeline::{GatewayProxy, KeyAuth, Metrics};
 use pingogate_snapshot::SnapshotHolder;
+use pingogate_storage::KeyVault;
 use pingora::proxy::{http_proxy_service, HttpProxy};
 use pingora::server::configuration::ServerConf;
 use pingora::services::listening::Service;
@@ -20,11 +21,18 @@ pub use admin::{build_admin_service, AdminServiceConfig, Reloader, ReloadStatusS
 /// Configuration for the public data-plane service, bundled to keep the factory
 /// within the parameter limit (constitution V). Mirrors [`AdminServiceConfig`].
 /// `conf` is borrowed from the Pingora `Server` that owns the configuration.
+///
+/// Mode selection (constitution XII): `keyvault: None` = standalone mode
+/// (env-resolved plaintext keys); `keyvault: Some` = platform mode (per-request
+/// AES-GCM decrypt of ciphertext provider keys).
 pub struct PublicServiceConfig<'a> {
     pub conf: &'a Arc<ServerConf>,
     pub holder: Arc<SnapshotHolder>,
     pub metrics: Arc<Metrics>,
     pub auth: Arc<dyn KeyAuth>,
+    /// Platform mode only: AES-GCM KeyVault for per-request provider-key
+    /// decrypt. `None` in standalone mode (env-resolved plaintext keys).
+    pub keyvault: Option<Arc<dyn KeyVault>>,
     pub address: &'a str,
 }
 
@@ -32,13 +40,22 @@ pub struct PublicServiceConfig<'a> {
 /// gateway pipeline, bound to `address`. The shared `metrics` registry is the
 /// same instance the Admin API renders at `/metrics`, so data-plane records are
 /// visible to the control plane.
+///
+/// Constructs `GatewayProxy::new_platform` when `config.keyvault` is `Some`,
+/// `GatewayProxy::new` (standalone) otherwise.
 pub fn build_public_service(
     config: PublicServiceConfig<'_>,
 ) -> Service<HttpProxy<GatewayProxy, ()>> {
-    let mut service = http_proxy_service(
-        config.conf,
-        GatewayProxy::new(config.holder, config.metrics, config.auth),
-    );
+    let proxy = match config.keyvault {
+        Some(kv) => GatewayProxy::new_platform(
+            config.holder,
+            config.metrics,
+            config.auth,
+            kv,
+        ),
+        None => GatewayProxy::new(config.holder, config.metrics, config.auth),
+    };
+    let mut service = http_proxy_service(config.conf, proxy);
     service.add_tcp(config.address);
     service
 }

@@ -4,12 +4,22 @@
 //! extracts the presented key from headers ([`crate::auth_filter`]), then hands
 //! it to a `KeyAuth` impl together with the pinned snapshot. S1 ships
 //! [`StaticKeyAuth`] (standalone mode: match against the snapshot's enabled
-//! gateway keys). S2 will add a platform-mode impl that consults virtual keys.
+//! gateway keys). S3 ships [`crate::VirtualKeyAuth`] (platform mode: hash +
+//! virtual-key lookup + concurrency quota).
 //!
 //! The trait returns a [`Principal`] on success so the pipeline can record the
 //! authenticated identity without knowing how the match was performed. The
 //! snapshot only contains enabled keys (disabled ones are filtered at build
-//! time in `pingogate-snapshot`), so no `enabled` check is needed here.
+//! time in `pingogate-snapshot`), so no `enabled` check is needed for
+//! [`StaticKeyAuth`]; [`crate::VirtualKeyAuth`] still checks `enabled` because
+//! virtual keys are mirrored verbatim from the proto (not filtered at build
+//! time).
+//!
+//! [`release`] is the symmetric pair of [`authenticate`]: the pipeline calls it
+//! exactly once per successful authentication, at request end (success or
+//! error), so stateful authenticators (e.g. [`crate::VirtualKeyAuth`]'s
+//! concurrency counter) can release per-request state. The default is a no-op
+//! for stateless authenticators like [`StaticKeyAuth`].
 
 use pingogate_core_types::Principal;
 use pingogate_snapshot::RuntimeSnapshot;
@@ -20,6 +30,12 @@ pub trait KeyAuth: Send + Sync {
     /// Returns the authenticated [`Principal`] when `credential` matches a
     /// configured gateway key, otherwise `None`.
     fn authenticate(&self, credential: &str, snapshot: &RuntimeSnapshot) -> Option<Principal>;
+
+    /// Release any per-request state held by the authenticator (e.g.
+    /// concurrency counter). Called exactly once per authenticated request,
+    /// at request end (success or error). Default: no-op for stateless
+    /// authenticators ([`StaticKeyAuth`]).
+    fn release(&self, _principal: &Principal) {}
 }
 
 /// Standalone-mode authenticator: matches the presented credential against the

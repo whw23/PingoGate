@@ -3,8 +3,16 @@
 //! The pipeline strips the client's gateway key and injects the provider's own
 //! credential according to its declared auth method. The resolved key lives on
 //! the snapshot's `ResolvedProvider`; adapters never see plaintext.
+//!
+//! Standalone mode ([`UpstreamAuth::build`]) reads env-resolved plaintext from
+//! `ResolvedProvider::key`. Platform mode ([`UpstreamAuth::build_platform`])
+//! decrypts `ResolvedProvider::encrypted_key` via the [`KeyVault`] per request
+//! (constitution XX: "明文仅在 `KeyVault::decrypt()` 返回的 `SecretString` 中
+//! 存活"); the returned [`SecretString`] is dropped at the end of
+//! `upstream_request_filter`, clearing plaintext from memory.
 
-use pingogate_core_types::AuthMethod;
+use pingogate_core_types::{AuthMethod, SecretString};
+use pingogate_storage::{KeyError, KeyVault};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
 /// Inbound header names that carry a gateway key; stripped before forwarding.
@@ -36,6 +44,30 @@ impl UpstreamAuth {
             AuthMethod::QueryKey => Self::QueryKey(key.to_string()),
         }
     }
+
+    /// Platform-mode build: decrypt `encrypted_key` via the [`KeyVault`] once,
+    /// then inject the plaintext per the auth method. The plaintext lives only
+    /// in the returned [`SecretString`]; the caller must drop it at the end of
+    /// the request phase (constitution XX: "明文仅在 `KeyVault::decrypt()`
+    /// 返回的 `SecretString` 中存活").
+    ///
+    /// Per S1 research: AES-GCM decrypt is ~0.2µs, negligible vs the 5 ms p50
+    /// budget. No caching: each request decrypts fresh (constitution XX:
+    /// "不缓存、不常驻").
+    pub fn build_platform(
+        method: AuthMethod,
+        encrypted_key: &[u8],
+        keyvault: &dyn KeyVault,
+        anthropic_version: Option<&str>,
+    ) -> Result<Self, KeyError> {
+        // Per-request decrypt; plaintext lives only in `plaintext` which drops
+        // at the end of this function. The returned UpstreamAuth carries the
+        // plaintext as an owned String (injected into the upstream header); it
+        // must be dropped by the caller at request end.
+        let plaintext: SecretString = keyvault.decrypt(encrypted_key)?;
+        let key = plaintext.expose();
+        Ok(Self::build(method, key, anthropic_version))
+    }
 }
 
 /// Append `key=<value>` to an origin-form path-and-query string (Gemini).
@@ -54,6 +86,8 @@ pub fn append_query_key(path_and_query: &str, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn bearer_wraps_key() {
@@ -99,5 +133,109 @@ mod tests {
             append_query_key("/v1beta/x:generateContent?alt=sse", "sk123"),
             "/v1beta/x:generateContent?alt=sse&key=sk123"
         );
+    }
+
+    /// Mock KeyVault that counts `decrypt` calls and returns a fixed plaintext.
+    /// Verifies the platform hot path calls `decrypt` exactly once per request
+    /// and that the plaintext is correctly injected into the auth plan.
+    struct CountingKeyVault {
+        calls: Arc<AtomicUsize>,
+        plaintext: &'static str,
+    }
+
+    impl KeyVault for CountingKeyVault {
+        fn encrypt(&self, _plaintext: &[u8]) -> Result<Vec<u8>, KeyError> {
+            Err(KeyError::EncryptFailed)
+        }
+        fn decrypt(&self, _ciphertext: &[u8]) -> Result<SecretString, KeyError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Ok(SecretString::new(self.plaintext))
+        }
+    }
+
+    #[test]
+    fn build_platform_decrypts_per_request_bearer() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let kv = CountingKeyVault {
+            calls: calls.clone(),
+            plaintext: "sk-openai-real",
+        };
+        let ct = b"ciphertext-bytes";
+        let auth = UpstreamAuth::build_platform(AuthMethod::Bearer, ct, &kv, None)
+            .expect("decrypt must succeed");
+        assert_eq!(auth, UpstreamAuth::BearerHeader("Bearer sk-openai-real".to_string()));
+        // Exactly one decrypt per request (no cache; constitution XX).
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn build_platform_decrypts_per_request_api_key_with_version() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let kv = CountingKeyVault {
+            calls: calls.clone(),
+            plaintext: "sk-anthropic",
+        };
+        let auth = UpstreamAuth::build_platform(
+            AuthMethod::ApiKeyHeader,
+            b"ct",
+            &kv,
+            Some("2023-06-01"),
+        )
+        .expect("decrypt must succeed");
+        assert_eq!(
+            auth,
+            UpstreamAuth::ApiKeyHeader {
+                key: "sk-anthropic".to_string(),
+                version: Some("2023-06-01".to_string())
+            }
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn build_platform_decrypts_per_request_query_key() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let kv = CountingKeyVault {
+            calls: calls.clone(),
+            plaintext: "sk-gemini",
+        };
+        let auth = UpstreamAuth::build_platform(AuthMethod::QueryKey, b"ct", &kv, None)
+            .expect("decrypt must succeed");
+        assert_eq!(auth, UpstreamAuth::QueryKey("sk-gemini".to_string()));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn build_platform_propagates_decrypt_error() {
+        struct FailingKeyVault;
+        impl KeyVault for FailingKeyVault {
+            fn encrypt(&self, _: &[u8]) -> Result<Vec<u8>, KeyError> {
+                Err(KeyError::EncryptFailed)
+            }
+            fn decrypt(&self, _: &[u8]) -> Result<SecretString, KeyError> {
+                Err(KeyError::DecryptFailed)
+            }
+        }
+        let err = UpstreamAuth::build_platform(
+            AuthMethod::Bearer,
+            b"bad-ct",
+            &FailingKeyVault,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, KeyError::DecryptFailed));
+    }
+
+    #[test]
+    fn build_platform_decrypts_twice_for_two_requests_no_cache() {
+        // Verifies no caching: two back-to-back builds each call decrypt.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let kv = CountingKeyVault {
+            calls: calls.clone(),
+            plaintext: "sk-x",
+        };
+        let _a = UpstreamAuth::build_platform(AuthMethod::Bearer, b"ct", &kv, None).unwrap();
+        let _b = UpstreamAuth::build_platform(AuthMethod::Bearer, b"ct", &kv, None).unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 }

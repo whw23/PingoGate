@@ -42,6 +42,8 @@ tonic-build = "0.12"
 async-trait = "0.1"
 # Constant-time comparison for credential checks (constitution XX security).
 subtle = "2"
+# SHA-256 for virtual-key token hashing (platform-mode auth; S3).
+sha2 = "0.10"
 # Lightweight percent-encoding for upstream URL query values.
 percent-encoding = "2"
 # AES-GCM provider-key encryption (constitution XX KeyVault security core).

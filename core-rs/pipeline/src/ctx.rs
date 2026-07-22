@@ -9,12 +9,15 @@
 //!
 //! Authentication is delegated to a [`KeyAuth`](crate::key_auth::KeyAuth) impl
 //! injected at construction, so the pipeline does not inline gateway-key
-//! lookup (constitution VII/ VIII: trait-based, low coupling).
+//! lookup (constitution VII/ VIII: trait-based, low coupling). The
+//! authenticated [`Principal`] is stored on the context so the pipeline can
+//! release any per-request state (e.g. VirtualKeyAuth's concurrency counter)
+//! at request end via [`KeyAuth::release`](crate::key_auth::KeyAuth::release).
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use pingogate_core_types::{AppError, ProtocolKind, RequestContext, TraceId};
+use pingogate_core_types::{AppError, Principal, ProtocolKind, RequestContext, TraceId};
 use pingogate_provider::TokenUsage;
 use pingogate_snapshot::RuntimeSnapshot;
 
@@ -31,6 +34,10 @@ pub struct GatewayCtx {
     pub request: RequestContext,
     /// Name of the authenticated gateway key, once authenticated.
     pub gateway_key_name: Option<String>,
+    /// The authenticated principal, if auth succeeded. Stored so the pipeline
+    /// can call [`KeyAuth::release`] at request end (VirtualKeyAuth's
+    /// concurrency counter; StaticKeyAuth is a no-op).
+    pub(crate) authenticated_principal: Option<Principal>,
     /// Identified inbound protocol (drives the mirrored error shape).
     pub(crate) protocol: Option<ProtocolKind>,
     /// Resolved upstream provider name.
@@ -61,6 +68,7 @@ impl GatewayCtx {
             auth,
             request: RequestContext::new(TraceId::generate()),
             gateway_key_name: None,
+            authenticated_principal: None,
             protocol: None,
             route_provider: None,
             upstream: None,
@@ -88,10 +96,21 @@ impl GatewayCtx {
         match self.auth.authenticate(&presented, &self.snapshot) {
             Some(principal) => {
                 self.gateway_key_name = Some(principal.id.clone());
-                self.request.principal = Some(principal.id);
+                self.request.principal = Some(principal.id.clone());
+                self.authenticated_principal = Some(principal);
                 None
             }
             None => Some(AppError::AuthFailed),
+        }
+    }
+
+    /// Release any per-request auth state (e.g. VirtualKeyAuth's concurrency
+    /// counter). Called exactly once at request end (success or error) by the
+    /// pipeline's `logging` hook. Safe to call when auth never happened (the
+    /// principal is `None` and this is a no-op).
+    pub(crate) fn release_auth(&mut self) {
+        if let Some(principal) = self.authenticated_principal.take() {
+            self.auth.release(&principal);
         }
     }
 }

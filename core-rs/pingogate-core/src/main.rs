@@ -125,6 +125,9 @@ fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
         holder: holder.clone(),
         metrics: metrics.clone(),
         auth,
+        // Standalone mode: no KeyVault; provider keys are env-resolved
+        // plaintext on the snapshot (constitution XII).
+        keyvault: None,
         address: &public_addr,
     });
     let admin = build_admin_service(AdminServiceConfig {

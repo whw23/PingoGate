@@ -10,8 +10,12 @@ use crate::error::AppError;
 /// The category of an authenticated caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrincipalKind {
-    /// A client presenting a named gateway key (data path).
+    /// A client presenting a named gateway key (data path, standalone mode).
     GatewayKey,
+    /// A client presenting a virtual key (data path, platform mode). Carries
+    /// the virtual-key id as `id` and the owning user as `owner_user_id`
+    /// (BYOK visibility, constitution XX).
+    VirtualKey,
     /// An operator/automation calling the Admin API.
     Admin,
     /// The gateway itself (internal/system actions).
@@ -23,6 +27,9 @@ pub enum PrincipalKind {
 pub struct Principal {
     pub id: String,
     pub kind: PrincipalKind,
+    /// Platform mode only: the user who owns the virtual key (BYOK visibility,
+    /// constitution XX). `None` for `GatewayKey` / `Admin` / `System`.
+    pub owner_user_id: Option<String>,
 }
 
 impl Principal {
@@ -30,18 +37,31 @@ impl Principal {
         Self {
             id: id.into(),
             kind: PrincipalKind::GatewayKey,
+            owner_user_id: None,
+        }
+    }
+    /// Build a platform-mode virtual-key principal. `id` is the virtual-key
+    /// id; `owner_user_id` is the user who owns the virtual key (and the
+    /// provider key it references, by BYOK visibility).
+    pub fn virtual_key(id: impl Into<String>, owner_user_id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            kind: PrincipalKind::VirtualKey,
+            owner_user_id: Some(owner_user_id.into()),
         }
     }
     pub fn admin(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             kind: PrincipalKind::Admin,
+            owner_user_id: None,
         }
     }
     pub fn system() -> Self {
         Self {
             id: "system".to_string(),
             kind: PrincipalKind::System,
+            owner_user_id: None,
         }
     }
 }
@@ -122,6 +142,7 @@ impl AuthContext {
             (self.principal.kind, action),
             (PrincipalKind::System, _)
                 | (PrincipalKind::GatewayKey, Action::Proxy)
+                | (PrincipalKind::VirtualKey, Action::Proxy)
                 | (
                     PrincipalKind::Admin,
                     Action::AdminRead | Action::AdminReload | Action::AdminValidate,
@@ -171,5 +192,22 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind(), "pingogate.unauthorized");
         assert_eq!(err.http_status(), 403);
+    }
+
+    #[test]
+    fn virtual_key_may_proxy_but_not_administer() {
+        let ctx = AuthContext::new(Principal::virtual_key("vk-1", "user-7"));
+        assert!(ctx.authorize(Action::Proxy, &Resource::route("gpt-4o")).is_ok());
+        assert!(ctx
+            .authorize(Action::AdminReload, &Resource::admin_endpoint("/reload"))
+            .is_err());
+    }
+
+    #[test]
+    fn virtual_key_carries_owner_for_byok_visibility() {
+        let p = Principal::virtual_key("vk-1", "user-7");
+        assert_eq!(p.kind, PrincipalKind::VirtualKey);
+        assert_eq!(p.id, "vk-1");
+        assert_eq!(p.owner_user_id.as_deref(), Some("user-7"));
     }
 }
