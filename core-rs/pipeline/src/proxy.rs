@@ -1,13 +1,11 @@
 //! The gateway's `ProxyHttp` implementation (constitution VI; research R1).
 //!
 //! Fixed pipeline: protocol -> auth -> routing -> upstream-auth -> SSE
-//! passthrough -> mirrored error -> observability. Each request is pinned to
-//! its `new_ctx` snapshot (FR-021). Dual mode (XII): `keyvault: None`
-//! (standalone) vs `Some` (platform, per-request AES-GCM decrypt, XX).
+//! passthrough -> mirrored error -> observability. Pinned to `new_ctx` snapshot
+//! (FR-021). Dual mode (XII): `keyvault: None` (standalone) vs `Some` (platform).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingogate_core_types::{AppError, CapabilityFamily, ProtocolKind, TraceId, TRACE_HEADER};
@@ -24,7 +22,7 @@ use crate::metrics::Metrics;
 use crate::observe;
 use crate::protocol::{self, Detected, Detection};
 use crate::streaming;
-use crate::upstream_auth::{UpstreamAuth, GATEWAY_KEY_HEADERS};
+use crate::upstream_auth::GATEWAY_KEY_HEADERS;
 use crate::upstream_peer::{resolve_route, UpstreamTarget};
 use crate::usage_extractor::UsageExtractor;
 use crate::wire;
@@ -113,10 +111,17 @@ impl ProxyHttp for GatewayProxy {
             .unwrap_or_else(|| "/".to_string());
         let mut path = format!("{}{}", base_path.unwrap_or_default(), original);
 
-        let auth = build_upstream_auth(&self.keyvault, provider)?;
+        let auth = crate::upstream_auth::build_upstream_auth(&self.keyvault, provider)?;
         wire::apply_upstream_auth(upstream_request, auth, &mut path)?;
         if let Some(host) = host {
             upstream_request.insert_header("host", host.as_str())?;
+        }
+        // Update Content-Length to match the injected body (T28): Pingora sends
+        // headers before body, so the original Content-Length would mismatch
+        // the stream_options-injected body and truncate it at the upstream.
+        if let Some(ref injected) = ctx.injected_request_body {
+            upstream_request
+                .insert_header("content-length", injected.len().to_string())?;
         }
         if let Ok(uri) = path.parse::<http::Uri>() {
             upstream_request.set_uri(uri);
@@ -136,6 +141,20 @@ impl ProxyHttp for GatewayProxy {
             .and_then(|v| v.to_str().ok());
         if streaming::response_is_streaming(content_type) {
             ctx.streaming = true;
+        }
+        Ok(())
+    }
+
+    /// Swap in the pre-computed `include_usage`-injected body (T28).
+    async fn request_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        if let Some(injected) = ctx.injected_request_body.take() {
+            *body = Some(injected);
         }
         Ok(())
     }
@@ -245,7 +264,9 @@ async fn prepare(
 }
 
 /// Record the resolved route, streaming flag, and usage extractor on the
-/// request context.
+/// request context. For OpenAI Chat streaming, pre-computes the injected body
+/// (T28: `stream_options.include_usage`) so `upstream_request_filter` can set
+/// `Content-Length` before headers ship (Pingora sends headers before body).
 fn commit_route(
     ctx: &mut GatewayCtx,
     detected: Detected,
@@ -258,39 +279,20 @@ fn commit_route(
     ctx.protocol = Some(detected.protocol);
     ctx.request.protocol = Some(detected.protocol);
     ctx.request.provider = Some(provider.clone());
-    // Single capability family this phase; label metrics by it (FR-033).
     ctx.request.capability_family = Some(CapabilityFamily::GenerationStateless);
     ctx.route_provider = Some(provider);
     ctx.upstream = Some(target);
-    // Spin up the inline usage extractor now that the protocol is known.
-    // Stays `None` for unrouted/error requests (body filter is a no-op then).
     ctx.usage_extractor = Some(UsageExtractor::new(detected.protocol));
-}
-
-/// Build the upstream auth plan, branching on mode (constitution XII/XX).
-/// Platform: per-request decrypt of `encrypted_key`. Standalone: env-resolved
-/// plaintext from `provider.key`.
-fn build_upstream_auth(
-    keyvault: &Option<Arc<dyn KeyVault>>,
-    provider: &pingogate_snapshot::ResolvedProvider,
-) -> Result<UpstreamAuth> {
-    match keyvault {
-        Some(kv) => {
-            let encrypted = provider.encrypted_key.as_ref().ok_or_else(|| {
-                Error::explain(ErrorType::InternalError, "platform-mode provider missing encrypted_key")
-            })?;
-            UpstreamAuth::build_platform(
-                provider.auth_method,
-                encrypted,
-                kv.as_ref(),
-                provider.anthropic_version.as_deref(),
-            )
-            .map_err(|e| Error::explain(ErrorType::InternalError, format!("keyvault decrypt failed: {e}")))
+    if ctx.streaming && detected.protocol == ProtocolKind::OpenAiCompatible {
+        if let Some(b) = body.as_deref() {
+            let injected = pingogate_transform::inject_include_usage(
+                b,
+                ProtocolKind::OpenAiCompatible,
+                true,
+            );
+            if injected != b {
+                ctx.injected_request_body = Some(Bytes::from(injected));
+            }
         }
-        None => Ok(UpstreamAuth::build(
-            provider.auth_method,
-            provider.key.expose(),
-            provider.anthropic_version.as_deref(),
-        )),
     }
 }

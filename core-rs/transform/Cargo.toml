@@ -3,3 +3,7 @@
 name = "pingogate-transform"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+pingogate-core-types = { path = "../core" }
+serde_json = { workspace = true }

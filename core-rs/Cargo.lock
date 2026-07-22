@@ -1668,6 +1668,7 @@ dependencies = [
  "pingogate-provider",
  "pingogate-snapshot",
  "pingogate-storage",
+ "pingogate-transform",
  "pingora",
  "serde_json",
  "sha2",
@@ -1712,6 +1713,10 @@ dependencies = [
 [[package]]
 name = "pingogate-transform"
 version = "0.1.0"
+dependencies = [
+ "pingogate-core-types",
+ "serde_json",
+]
 
 [[package]]
 name = "pingora"

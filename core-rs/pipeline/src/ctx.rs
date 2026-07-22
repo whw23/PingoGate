@@ -17,6 +17,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use bytes::Bytes;
 use pingogate_core_types::{AppError, Principal, ProtocolKind, RequestContext, TraceId};
 use pingogate_provider::TokenUsage;
 use pingogate_snapshot::RuntimeSnapshot;
@@ -58,6 +59,12 @@ pub struct GatewayCtx {
     pub(crate) usage_extractor: Option<UsageExtractor>,
     /// Token counts parsed from the upstream response, when available.
     pub(crate) tokens: Option<TokenUsage>,
+    /// Pre-computed injected request body for OpenAI Chat streaming requests
+    /// (constitution VI; T28). When set, `upstream_request_filter` updates
+    /// `Content-Length` and `request_body_filter` replaces the retry-buffered
+    /// body with this version (which has `stream_options.include_usage: true`
+    /// injected). `None` for non-OpenAI / non-streaming requests.
+    pub(crate) injected_request_body: Option<Bytes>,
 }
 
 impl GatewayCtx {
@@ -78,6 +85,7 @@ impl GatewayCtx {
             upstream_started: None,
             usage_extractor: None,
             tokens: None,
+            injected_request_body: None,
         }
     }
 

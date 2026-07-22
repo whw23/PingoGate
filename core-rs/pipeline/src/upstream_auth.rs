@@ -11,9 +11,13 @@
 //! 存活"); the returned [`SecretString`] is dropped at the end of
 //! `upstream_request_filter`, clearing plaintext from memory.
 
+use std::sync::Arc;
+
 use pingogate_core_types::{AuthMethod, SecretString};
+use pingogate_snapshot::ResolvedProvider;
 use pingogate_storage::{KeyError, KeyVault};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use pingora::{Error, ErrorType, Result};
 
 /// Inbound header names that carry a gateway key; stripped before forwarding.
 pub const GATEWAY_KEY_HEADERS: [&str; 2] = ["authorization", "x-api-key"];
@@ -67,6 +71,34 @@ impl UpstreamAuth {
         let plaintext: SecretString = keyvault.decrypt(encrypted_key)?;
         let key = plaintext.expose();
         Ok(Self::build(method, key, anthropic_version))
+    }
+}
+
+/// Build the upstream auth plan, branching on mode (constitution XII/XX).
+/// Platform: per-request decrypt of `encrypted_key`. Standalone: env-resolved
+/// plaintext from `provider.key`.
+pub fn build_upstream_auth(
+    keyvault: &Option<Arc<dyn KeyVault>>,
+    provider: &ResolvedProvider,
+) -> Result<UpstreamAuth> {
+    match keyvault {
+        Some(kv) => {
+            let encrypted = provider.encrypted_key.as_ref().ok_or_else(|| {
+                Error::explain(ErrorType::InternalError, "platform-mode provider missing encrypted_key")
+            })?;
+            UpstreamAuth::build_platform(
+                provider.auth_method,
+                encrypted,
+                kv.as_ref(),
+                provider.anthropic_version.as_deref(),
+            )
+            .map_err(|e| Error::explain(ErrorType::InternalError, format!("keyvault decrypt failed: {e}")))
+        }
+        None => Ok(UpstreamAuth::build(
+            provider.auth_method,
+            provider.key.expose(),
+            provider.anthropic_version.as_deref(),
+        )),
     }
 }
 
