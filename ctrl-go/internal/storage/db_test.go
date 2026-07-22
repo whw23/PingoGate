@@ -39,6 +39,32 @@ func TestOpenAndMigrate(t *testing.T) {
 		}
 	})
 
+	t.Run("virtual_keys_table_exists", func(t *testing.T) {
+		var name string
+		err := db.Get(&name,
+			"SELECT name FROM sqlite_master WHERE type='table' AND name='virtual_keys'")
+		if err != nil {
+			t.Fatalf("virtual_keys table not created: %v", err)
+		}
+		if name != "virtual_keys" {
+			t.Fatalf("got name=%q, want %q", name, "virtual_keys")
+		}
+	})
+
+	t.Run("virtual_keys_indexes_exist", func(t *testing.T) {
+		for _, idx := range []string{"idx_virtual_keys_owner", "idx_virtual_keys_token_hash"} {
+			var name string
+			err := db.Get(&name,
+				"SELECT name FROM sqlite_master WHERE type='index' AND name = ?", idx)
+			if err != nil {
+				t.Fatalf("index %s not created: %v", idx, err)
+			}
+			if name != idx {
+				t.Fatalf("got index name=%q, want %q", name, idx)
+			}
+		}
+	})
+
 	t.Run("migrations_are_idempotent", func(t *testing.T) {
 		// Re-running migrate on the same DB must be a no-op: no error and no
 		// duplicate rows in schema_migrations.
@@ -49,7 +75,7 @@ func TestOpenAndMigrate(t *testing.T) {
 		if err := db.Get(&count, "SELECT COUNT(*) FROM schema_migrations"); err != nil {
 			t.Fatalf("count schema_migrations: %v", err)
 		}
-		if want := 3; count != want {
+		if want := 4; count != want {
 			t.Fatalf("schema_migrations count = %d, want %d", count, want)
 		}
 	})

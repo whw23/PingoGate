@@ -32,6 +32,7 @@ import (
 	pb "github.com/whw23/pingogate/ctrl-go/internal/proto"
 	"github.com/whw23/pingogate/ctrl-go/internal/snapshot"
 	"github.com/whw23/pingogate/ctrl-go/internal/storage"
+	"github.com/whw23/pingogate/ctrl-go/internal/vkey"
 )
 
 // Env var holding the shared gRPC internal token (spec §12A/§12B). Missing =
@@ -165,6 +166,8 @@ func main() {
 	identity.RegisterRoutes(r, idStore)
 	keyStore := keymgmt.NewStore(db)
 	keymgmt.RegisterRoutes(r, keyStore, kvClient, pusher)
+	vkeyStore := vkey.NewStore(db)
+	vkey.RegisterRoutes(r, vkeyStore, pusher)
 
 	httpAddr := httpAddrFromEnv()
 	log.Printf("control-plane HTTP listening on %s", httpAddr)

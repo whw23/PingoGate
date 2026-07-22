@@ -15,6 +15,7 @@ package snapshot
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	pb "github.com/whw23/pingogate/ctrl-go/internal/proto"
@@ -137,11 +138,88 @@ func (b *Builder) Build(ctx context.Context, version uint64) (*pb.Snapshot, erro
 		providers = append(providers, pe)
 	}
 
+	virtualKeys, err := b.buildVirtualKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &pb.Snapshot{
 		Version:       version,
 		Providers:     providers,
 		Routes:        nil, // S2 has no routes table; routes is S3.
-		VirtualKeys:   nil, // S3 feature.
+		VirtualKeys:   virtualKeys,
 		EncryptedKeys: encryptedKeys,
 	}, nil
+}
+
+// vkeyRow is the subset of virtual_keys columns the Builder needs. It is
+// private to this file; the Store in vkey owns the full row model.
+type vkeyRow struct {
+	ID                string  `db:"id"`
+	TokenHash         string  `db:"token_hash"`
+	OwnerUserID       string  `db:"owner_user_id"`
+	ProviderKeyID     sql.NullString `db:"provider_key_id"`
+	AllowedModels     string  `db:"allowed_models"`
+	AllowedProviders  string  `db:"allowed_providers"`
+	ExpiresAt         int64   `db:"expires_at"`
+	MaxConcurrency    int32   `db:"max_concurrency"`
+	Enabled           int     `db:"enabled"`
+}
+
+// buildVirtualKeys reads enabled virtual_keys and assembles proto
+// VirtualKeyEntry messages. Only enabled keys are included so the Rust hot
+// path cannot use revoked keys (constitution X: Control Plane State is
+// authoritative). The token_hash is copied verbatim from the DB; the Rust
+// kernel compares it in constant time (subtle::ct_eq on the hex digest).
+//
+// allowed_models / allowed_providers are stored as JSON arrays in the DB;
+// the proto expects repeated string, so we decode the JSON here. NULL or
+// "[]" both yield an empty slice, which the Rust kernel treats as
+// "unrestricted".
+func (b *Builder) buildVirtualKeys(ctx context.Context) ([]*pb.VirtualKeyEntry, error) {
+	const q = `SELECT id, token_hash, owner_user_id, provider_key_id,
+	                  allowed_models, allowed_providers, expires_at,
+	                  max_concurrency, enabled
+	           FROM virtual_keys
+	           WHERE enabled = 1
+	           ORDER BY id ASC`
+	var rows []vkeyRow
+	if err := b.db.SelectContext(ctx, &rows, q); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("snapshot: read virtual_keys: %w", err)
+	}
+
+	entries := make([]*pb.VirtualKeyEntry, 0, len(rows))
+	for _, r := range rows {
+		entries = append(entries, &pb.VirtualKeyEntry{
+			Id:               r.ID,
+			TokenHash:        r.TokenHash,
+			OwnerUserId:      r.OwnerUserID,
+			ProviderKeyId:    r.ProviderKeyID.String,
+			AllowedModels:    decodeJSONStringList(r.AllowedModels),
+			AllowedProviders: decodeJSONStringList(r.AllowedProviders),
+			ExpiresAt:        r.ExpiresAt,
+			MaxConcurrency:   r.MaxConcurrency,
+			Enabled:          r.Enabled == 1,
+		})
+	}
+	return entries, nil
+}
+
+// decodeJSONStringList parses a JSON array string into a []string. Empty
+// string returns nil (the Rust kernel treats nil and []string{} identically,
+// both = unrestricted). Malformed JSON returns nil rather than failing the
+// whole push: one bad row should not block the snapshot (matches the
+// provider_type skip policy in Build).
+func decodeJSONStringList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(s), &list); err != nil {
+		return nil
+	}
+	return list
 }
