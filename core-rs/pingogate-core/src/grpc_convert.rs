@@ -9,7 +9,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use pingogate_core_types::{AuthMethod, CapabilityFamily, ProviderKind, SecretString};
-use pingogate_snapshot::{ResolvedProvider, Route, RuntimeSnapshot, UpstreamConfig};
+use pingogate_snapshot::{ResolvedProvider, Route, RuntimeSnapshot, UpstreamConfig, VirtualKeyEntry};
 use tonic::Status;
 
 use super::pingogate::Snapshot;
@@ -21,9 +21,16 @@ use super::pingogate::Snapshot;
 /// - Each `ProviderEntry.encrypted_key_ref` is resolved against
 ///   `Snapshot.encrypted_keys` to obtain the AES-GCM ciphertext (`nonce ||
 ///   ciphertext`). The ciphertext is stored verbatim in
-///   [`ResolvedProvider::encrypted_key`]; `key` is an empty placeholder (the
-///   hot path decrypts per request via the KeyVault).
-/// - `virtual_keys` (S3) is ignored; `gateway_keys` is empty in S2.
+///   [`ResolvedProvider::encrypted_key`] AND aggregated into the snapshot-level
+///   `encrypted_keys` map (key_id -> ciphertext) so the hot path can decrypt
+///   by id without re-scanning providers.
+/// - `key_owners` is derived from `encrypted_keys`: for each
+///   `EncryptedProviderKey`, `key_owners[id] = owner_user_id` (S3 dual-defense
+///   per constitution XX: the Rust kernel can reject a virtual key whose
+///   `provider_key_id` is not owned by the virtual key's `owner_user_id`
+///   without a round-trip to Go).
+/// - `virtual_keys` (S3) is mirrored verbatim from the proto.
+/// - `gateway_keys` is empty in platform mode (S2/S3 uses virtual keys).
 /// - `upstream.timeout_ms` is not carried by the proto yet; the S1 default
 ///   (60_000 ms) is used until the proto is extended.
 ///
@@ -32,8 +39,10 @@ use super::pingogate::Snapshot;
 /// `encrypted_key_ref` must resolve to an existing `EncryptedProviderKey.id`.
 #[allow(clippy::result_large_err)] // tonic::Status is ~176 bytes; boxing adds indirection for no gain
 pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnapshot>, Status> {
-    // Index encrypted keys by id for O(1) ref resolution.
+    // Index encrypted keys by id for O(1) ref resolution + owner lookup.
     let mut key_map: HashMap<&str, &[u8]> = HashMap::new();
+    let mut key_owners: HashMap<String, String> = HashMap::new();
+    let mut encrypted_keys: HashMap<String, Vec<u8>> = HashMap::new();
     for ek in &snap.encrypted_keys {
         if key_map.insert(ek.id.as_str(), ek.ciphertext.as_slice()).is_some() {
             return Err(Status::invalid_argument(format!(
@@ -41,6 +50,11 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
                 ek.id
             )));
         }
+        // S3 dual-defense: key_id -> owner_user_id (constitution XX). An
+        // empty owner_user_id is accepted (the field is reserved for S3; S2
+        // may push an empty string for bootstrap providers).
+        key_owners.insert(ek.id.clone(), ek.owner_user_id.clone());
+        encrypted_keys.insert(ek.id.clone(), ek.ciphertext.clone());
     }
 
     let mut providers = Vec::with_capacity(snap.providers.len());
@@ -125,11 +139,33 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
         });
     }
 
+    // Mirror proto virtual keys verbatim into the snapshot (S3). The hot path
+    // authenticates by hash + checks owner against `key_owners` (constitution
+    // XX dual-defense). Empty in S2 bootstrap pushes.
+    let virtual_keys: Vec<VirtualKeyEntry> = snap
+        .virtual_keys
+        .iter()
+        .map(|vk| VirtualKeyEntry {
+            id: vk.id.clone(),
+            token_hash: vk.token_hash.clone(),
+            owner_user_id: vk.owner_user_id.clone(),
+            provider_key_id: vk.provider_key_id.clone(),
+            allowed_models: vk.allowed_models.clone(),
+            allowed_providers: vk.allowed_providers.clone(),
+            expires_at: vk.expires_at,
+            max_concurrency: vk.max_concurrency,
+            enabled: vk.enabled,
+        })
+        .collect();
+
     Ok(Arc::new(RuntimeSnapshot {
         version: snap.version,
         providers,
         routes,
         gateway_keys: Vec::new(),
+        virtual_keys,
+        key_owners,
+        encrypted_keys,
         upstream: UpstreamConfig { timeout_ms: 60_000 },
     }))
 }

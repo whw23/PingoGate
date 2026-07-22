@@ -43,6 +43,7 @@ mod tests {
     use super::*;
     use pingogate_core_types::SecretString;
     use pingogate_snapshot::{GatewayKey, RuntimeSnapshot, UpstreamConfig};
+    use std::collections::HashMap;
 
     fn snapshot_with_keys(keys: &[(&str, &str)]) -> RuntimeSnapshot {
         let gateway_keys = keys
@@ -57,6 +58,9 @@ mod tests {
             providers: Vec::new(),
             routes: Vec::new(),
             gateway_keys,
+            virtual_keys: Vec::new(),
+            key_owners: HashMap::new(),
+            encrypted_keys: HashMap::new(),
             upstream: UpstreamConfig { timeout_ms: 30000 },
         }
     }

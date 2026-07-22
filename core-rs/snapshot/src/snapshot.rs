@@ -10,6 +10,7 @@
 //! [`ResolvedProvider`] is the single home for the resolved [`SecretString`] in
 //! either mode (constitution XX).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arc_swap::{ArcSwap, Guard};
@@ -59,6 +60,31 @@ pub struct GatewayKey {
     pub secret: SecretString,
 }
 
+/// A virtual key entry (platform mode, S3). Mirrors the proto `VirtualKeyEntry`
+/// (T24): an opaque token presented by the caller, authenticated by hash
+/// comparison, scoped to a provider key + model/provider allowlists. The Rust
+/// kernel reads this from the [`RuntimeSnapshot`] on the hot path; the Go
+/// control plane pushes it via gRPC (constitution X).
+#[derive(Debug, Clone)]
+pub struct VirtualKeyEntry {
+    pub id: String,
+    /// Hash (bcrypt or SHA-256) of the presented token. Compared in constant
+    /// time on the hot path (constitution XX).
+    pub token_hash: String,
+    /// Owner user id (BYOK visibility: only this user can view the plaintext
+    /// provider key the virtual key references; constitution XX).
+    pub owner_user_id: String,
+    /// References `EncryptedProviderKey.id` in the snapshot's `encrypted_keys`.
+    pub provider_key_id: String,
+    pub allowed_models: Vec<String>,
+    pub allowed_providers: Vec<String>,
+    /// Unix timestamp; 0 = never expires.
+    pub expires_at: i64,
+    /// Concurrency quota; 0 = unlimited.
+    pub max_concurrency: i32,
+    pub enabled: bool,
+}
+
 /// Resolved upstream connection defaults.
 #[derive(Debug, Clone)]
 pub struct UpstreamConfig {
@@ -76,6 +102,20 @@ pub struct RuntimeSnapshot {
     pub providers: Vec<ResolvedProvider>,
     pub routes: Vec<Route>,
     pub gateway_keys: Vec<GatewayKey>,
+    /// Platform mode (S3): virtual keys pushed by the Go control plane. Empty
+    /// in standalone mode (which uses `gateway_keys`).
+    pub virtual_keys: Vec<VirtualKeyEntry>,
+    /// key_id -> owner_user_id (S3 dual-defense: Rust hot path can reject a
+    /// virtual key whose `provider_key_id` is not owned by the virtual key's
+    /// `owner_user_id` without a round-trip to Go). Built from
+    /// `encrypted_keys` at snapshot build time (constitution XX).
+    pub key_owners: HashMap<String, String>,
+    /// key_id -> AES-GCM ciphertext (`nonce || ciphertext`). The hot path
+    /// decrypts per request via the KeyVault (constitution XX: "明文仅在
+    /// `KeyVault::decrypt()` 返回的 `SecretString` 中存活"). Empty in
+    /// standalone mode (which resolves plaintext env refs into
+    /// `ResolvedProvider::key`).
+    pub encrypted_keys: HashMap<String, Vec<u8>>,
     pub upstream: UpstreamConfig,
 }
 
@@ -103,6 +143,11 @@ impl RuntimeSnapshot {
             providers,
             routes,
             gateway_keys,
+            // Standalone mode has no virtual keys, no ciphertext, no owner
+            // mapping (constitution X: platform-mode fields stay empty).
+            virtual_keys: Vec::new(),
+            key_owners: HashMap::new(),
+            encrypted_keys: HashMap::new(),
             upstream: UpstreamConfig {
                 timeout_ms: config.upstream.timeout_ms,
             },
@@ -210,6 +255,9 @@ impl SnapshotHolder {
                 providers: Vec::new(),
                 routes: Vec::new(),
                 gateway_keys: Vec::new(),
+                virtual_keys: Vec::new(),
+                key_owners: HashMap::new(),
+                encrypted_keys: HashMap::new(),
                 upstream: UpstreamConfig { timeout_ms: 60_000 },
             })),
         }

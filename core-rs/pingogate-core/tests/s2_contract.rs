@@ -31,6 +31,11 @@ use pingogate_keyvault::AesGcmKeyVault;
 use pingogate_snapshot::{RuntimeSnapshot, SnapshotHolder, UpstreamConfig};
 use pingogate_storage::{GrpcSnapshotSource, KeyVault, SnapshotSource};
 
+// Re-export std::collections::HashMap so the synthetic snapshot construction
+// below can initialize the new S3 fields without an extra import at the call
+// site.
+use std::collections::HashMap;
+
 // ---------------------------------------------------------------------------
 // 1. KeyVault AES-GCM round-trip (hermetic, T15)
 // ---------------------------------------------------------------------------
@@ -166,6 +171,9 @@ fn grpc_snapshot_source_apply_round_trip() {
         providers: Vec::new(),
         routes: Vec::new(),
         gateway_keys: Vec::new(),
+        virtual_keys: Vec::new(),
+        key_owners: HashMap::new(),
+        encrypted_keys: HashMap::new(),
         upstream: UpstreamConfig { timeout_ms: 60_000 },
     });
     source.apply(synthetic);

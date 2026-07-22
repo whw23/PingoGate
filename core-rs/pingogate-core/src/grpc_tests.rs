@@ -44,6 +44,71 @@ fn build_runtime_snapshot_resolves_encrypted_key_ref() {
     assert_eq!(p.encrypted_key.as_ref().unwrap().len(), 24);
     assert_eq!(rt.routes.len(), 1);
     assert!(rt.gateway_keys.is_empty());
+    // S3 dual-defense: encrypted_keys + key_owners are populated from the
+    // proto EncryptedProviderKey list (constitution XX).
+    assert_eq!(rt.encrypted_keys.len(), 1);
+    assert_eq!(rt.encrypted_keys["k1"].len(), 24);
+    assert_eq!(rt.key_owners.get("k1").unwrap(), "u1");
+    assert!(rt.virtual_keys.is_empty(), "no virtual_keys pushed");
+}
+
+#[test]
+fn build_runtime_snapshot_builds_key_owners_and_virtual_keys() {
+    use pingogate::{EncryptedProviderKey, Snapshot, VirtualKeyEntry as ProtoVKey};
+    let snap = Snapshot {
+        version: 3,
+        providers: vec![make_provider_entry("p", "openai-compatible", "bearer", "k1")],
+        routes: vec![],
+        virtual_keys: vec![ProtoVKey {
+            id: "vk1".to_string(),
+            token_hash: "hash-vk1".to_string(),
+            owner_user_id: "u1".to_string(),
+            provider_key_id: "k1".to_string(),
+            allowed_models: vec!["gpt-4o".to_string()],
+            allowed_providers: vec!["p".to_string()],
+            expires_at: 1_700_000_000,
+            max_concurrency: 4,
+            enabled: true,
+        }],
+        encrypted_keys: vec![
+            EncryptedProviderKey {
+                id: "k1".to_string(),
+                ciphertext: vec![1u8; 24],
+                owner_user_id: "u1".to_string(),
+                created_by: "u1".to_string(),
+            },
+            EncryptedProviderKey {
+                id: "k2".to_string(),
+                ciphertext: vec![2u8; 24],
+                owner_user_id: "u2".to_string(),
+                created_by: "u2".to_string(),
+            },
+        ],
+    };
+    let rt = build_runtime_snapshot(&snap).unwrap();
+
+    // key_owners derived from encrypted_keys.owner_user_id.
+    assert_eq!(rt.key_owners.len(), 2);
+    assert_eq!(rt.key_owners.get("k1").unwrap(), "u1");
+    assert_eq!(rt.key_owners.get("k2").unwrap(), "u2");
+
+    // encrypted_keys aggregated by id.
+    assert_eq!(rt.encrypted_keys.len(), 2);
+    assert_eq!(rt.encrypted_keys["k1"], vec![1u8; 24]);
+    assert_eq!(rt.encrypted_keys["k2"], vec![2u8; 24]);
+
+    // virtual_keys mirrored verbatim.
+    assert_eq!(rt.virtual_keys.len(), 1);
+    let vk = &rt.virtual_keys[0];
+    assert_eq!(vk.id, "vk1");
+    assert_eq!(vk.token_hash, "hash-vk1");
+    assert_eq!(vk.owner_user_id, "u1");
+    assert_eq!(vk.provider_key_id, "k1");
+    assert_eq!(vk.allowed_models, vec!["gpt-4o".to_string()]);
+    assert_eq!(vk.allowed_providers, vec!["p".to_string()]);
+    assert_eq!(vk.expires_at, 1_700_000_000);
+    assert_eq!(vk.max_concurrency, 4);
+    assert!(vk.enabled);
 }
 
 #[test]

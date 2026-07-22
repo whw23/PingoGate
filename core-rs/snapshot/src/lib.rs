@@ -15,5 +15,6 @@ pub mod validate;
 pub use model::GatewayConfig;
 pub use snapshot::{
     GatewayKey, ResolvedProvider, Route, RuntimeSnapshot, SnapshotHolder, UpstreamConfig,
+    VirtualKeyEntry,
 };
 pub use validate::{ConfigError, ValidationError};

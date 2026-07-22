@@ -53,6 +53,23 @@ fn builds_snapshot_with_routes_and_providers() {
     );
 }
 
+/// Standalone-mode `RuntimeSnapshot::build` leaves the platform-mode fields
+/// (`virtual_keys`, `key_owners`, `encrypted_keys`) empty (constitution X:
+/// standalone has no ciphertext, no virtual keys, no owner mapping).
+#[test]
+fn standalone_build_leaves_platform_fields_empty() {
+    let snap = build_snapshot();
+    assert!(snap.virtual_keys.is_empty(), "standalone has no virtual keys");
+    assert!(
+        snap.key_owners.is_empty(),
+        "standalone has no key_owners (no encrypted keys)"
+    );
+    assert!(
+        snap.encrypted_keys.is_empty(),
+        "standalone resolves env refs into ResolvedProvider::key, not ciphertext"
+    );
+}
+
 #[test]
 fn disabled_gateway_key_is_skipped_and_secret_not_required() {
     let snap = build_snapshot();
