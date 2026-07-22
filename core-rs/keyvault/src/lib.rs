@@ -12,6 +12,14 @@
 //! This crate depends on no other internal crate (it owns its own proto
 //! codegen); `pingogate-storage` wraps [`AesGcmKeyVault`] to satisfy the
 //! `KeyVault` trait used on the hot path (one-way dependency: storage -> keyvault).
+//!
+//! S3 adds the [`OwnerLookup`] trait + dual-defense check inside
+//! [`KeyVaultGrpcService::decrypt`]: `view_plaintext` decrypts require
+//! `requester == owner_of(key_id)` (constitution XX "1Password model"). The
+//! production `OwnerLookup` impl lives in `pingogate-core::grpc`
+//! (`SnapshotOwnerLookup`) and reads `key_owners` from the live
+//! `RuntimeSnapshot` via `Arc<SnapshotHolder>` - Rust holds the owner mapping
+//! independently of Go (AWS KMS pattern).
 
 pub mod crypto;
 pub mod grpc_service;
@@ -22,7 +30,9 @@ pub mod proto {
 }
 
 pub use crypto::{AesGcmKeyVault, KeyError};
-pub use grpc_service::KeyVaultGrpcService;
+pub use grpc_service::{
+    INTENT_HOT_PATH_INJECT, INTENT_VIEW_PLAINTEXT, KeyVaultGrpcService, OwnerLookup,
+};
 
 #[cfg(test)]
 mod tests {

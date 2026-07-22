@@ -11,14 +11,12 @@
 //  4. Store.Create(encrypted_key=ciphertext, key_last4=last4(plaintext),
 //     created_by=user.ID, owner_user_id=user.ID).
 //  5. Pusher.Push(ctx) -> gRPC PushSnapshot to Rust kernel (T20, spec §12C).
-//     Best-effort: push failures are logged but do not fail the HTTP response,
-//     because the DB is authoritative and Rust will catch up on the next push
-//     or on restart (spec §12C: "最终一致").
+//     Best-effort: push failures are logged but do not fail the HTTP response
+//     (DB is authoritative; Rust catches up on the next push or restart).
 //  6. Return key metadata (NO plaintext, NO ciphertext).
 //
-// List/Get flow: return key_last4 (last 4 chars) + metadata, never
-// ciphertext, never plaintext. The plaintext is never decrypted on the read
-// path (S3 adds a reveal endpoint restricted to created_by).
+// List/Get flow: return key_last4 + metadata, never ciphertext or plaintext.
+// S3 adds the Reveal endpoint (created_by only, see handler_reveal.go).
 package keymgmt
 
 import (
@@ -48,10 +46,17 @@ type SnapshotPusher interface {
 // a parent level; RegisterRoutes adds the Authorize check on top, so only
 // admins reach the handlers in L0 (L4 will relax this to per-owner).
 //
-// The pusher argument is optional (nil disables snapshot push on mutation,
-// useful for unit tests that only exercise the DB layer). When non-nil, the
-// handler calls Push after a successful Create/Delete so the Rust kernel's
-// in-memory snapshot stays in sync (spec §12C).
+// Routes (constitution XX "1Password model"):
+//   - POST   /                  create (encrypt plaintext, store ciphertext)
+//   - GET    /                  list caller's keys (last4 only)
+//   - GET    /{id}              get one key (last4 + metadata)
+//   - DELETE /{id}              delete
+//   - GET    /{id}/reveal       reveal plaintext ONCE (created_by only; Go L1
+//     created_by + Rust L2 owner = dual-defense, spec §12A)
+//
+// The pusher argument is optional (nil disables snapshot push on mutation).
+// When non-nil, the handler calls Push after Create/Delete so the Rust
+// kernel's in-memory snapshot stays in sync (spec §12C).
 func RegisterRoutes(r chi.Router, store *Store, kv KeyVaultClient, pusher SnapshotPusher) {
 	r.Route("/api/provider-keys", func(r chi.Router) {
 		r.Use(identity.Authorize("manage", "provider_keys"))
@@ -59,6 +64,7 @@ func RegisterRoutes(r chi.Router, store *Store, kv KeyVaultClient, pusher Snapsh
 		r.Get("/", listHandler(store))
 		r.Get("/{id}", getHandler(store))
 		r.Delete("/{id}", deleteHandler(store, pusher))
+		r.Get("/{id}/reveal", revealHandler(store, kv))
 	})
 }
 
@@ -84,10 +90,7 @@ type createResponse struct {
 // scope only; it is not logged and not persisted (constitution XX).
 //
 // After a successful Create, if pusher is non-nil, the handler calls
-// pusher.Push(ctx) to sync the new state to the Rust kernel (spec §12C). The
-// push is best-effort: a failure is logged but does NOT fail the HTTP
-// response, because the DB is authoritative and Rust will catch up on the
-// next push or on restart (spec §12C: "最终一致").
+// pusher.Push(ctx) (best-effort; DB is authoritative - spec §12C).
 func createHandler(store *Store, kv KeyVaultClient, pusher SnapshotPusher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := identity.UserFromContext(r.Context())
@@ -139,9 +142,7 @@ func createHandler(store *Store, kv KeyVaultClient, pusher SnapshotPusher) http.
 			return
 		}
 
-		// Best-effort snapshot push. The DB op already succeeded; a push
-		// failure (Rust down, network, etc.) does not roll back the Create.
-		// The operator sees a log line; the next mutation or restart retries.
+		// Best-effort snapshot push (DB is authoritative; spec §12C).
 		if pusher != nil {
 			if err := pusher.Push(r.Context()); err != nil {
 				log.Printf("keymgmt: snapshot push after Create %q failed: %v", pk.ID, err)
@@ -179,7 +180,9 @@ func listHandler(store *Store) http.HandlerFunc {
 }
 
 // getHandler handles GET /api/provider-keys/{id}. Returns key_last4 +
-// metadata; never returns ciphertext or plaintext. 404 when not found.
+// metadata; never returns ciphertext or plaintext. 404 when not found or
+// not owned (non-owners get 404 to avoid leaking existence). Plaintext
+// visibility is only via the Reveal endpoint (see handler_reveal.go).
 func getHandler(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := identity.UserFromContext(r.Context())
@@ -206,14 +209,10 @@ func getHandler(store *Store) http.HandlerFunc {
 	}
 }
 
-// deleteHandler handles DELETE /api/provider-keys/{id}. 404 when not
-// found, 204 on success. Enforces ownership (owner or admin).
-//
-// After a successful Delete, if pusher is non-nil, the handler calls
-// pusher.Push(ctx) to sync the new state to the Rust kernel (spec §12C). The
-// push is best-effort: a failure is logged but does NOT fail the HTTP
-// response, because the DB is authoritative and Rust will catch up on the
-// next push or on restart (spec §12C: "最终一致").
+// deleteHandler handles DELETE /api/provider-keys/{id}. 404 when not found,
+// 204 on success. Enforces ownership. After a successful Delete, if pusher
+// is non-nil, the handler calls pusher.Push(ctx) (best-effort; DB is
+// authoritative - spec §12C).
 func deleteHandler(store *Store, pusher SnapshotPusher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := identity.UserFromContext(r.Context())
@@ -240,9 +239,7 @@ func deleteHandler(store *Store, pusher SnapshotPusher) http.HandlerFunc {
 			return
 		}
 
-		// Best-effort snapshot push. The DB op already succeeded; a push
-		// failure does not roll back the Delete. The operator sees a log line;
-		// the next mutation or restart retries.
+		// Best-effort snapshot push (DB is authoritative; spec §12C).
 		if pusher != nil {
 			if err := pusher.Push(r.Context()); err != nil {
 				log.Printf("keymgmt: snapshot push after Delete %q failed: %v", id, err)

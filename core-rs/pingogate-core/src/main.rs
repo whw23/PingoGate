@@ -177,24 +177,27 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| format!("{GRPC_CA_ENV} is required in platform mode"))?,
     );
 
-    // Load the 32-byte master key (PINGO_MKEK) for the AES-GCM KeyVault.
-    // Missing or wrong length is fatal: without a valid MKEK the kernel cannot
-    // decrypt provider keys for the hot path (constitution XX). No secret
-    // material is included in the error value.
+    // Load the 32-byte master key (PINGO_MKEK). Missing or wrong length is
+    // fatal (constitution XX). No secret material in the error value.
     let mkek = load_master_key()?;
 
-    // Construct the AES-GCM KeyVault + gRPC service. The same keyvault instance
-    // is shared (via Arc) between the gRPC control-plane service and, from S3,
-    // the hot-path KeyVault trait wrapper.
-    let keyvault = Arc::new(pingogate_keyvault::AesGcmKeyVault::from_master_key(&mkek));
-    let keyvault_service = pingogate_keyvault::KeyVaultGrpcService::new(keyvault);
-
-    // Platform-mode snapshot source: an empty holder (version 0 sentinel) that
-    // the Go control plane fills via `PushSnapshot`. The data plane (S3+) will
-    // read from this holder; the `HealthService` reports not-ready until the
-    // first snapshot lands (spec §12B).
+    // Platform-mode snapshot holder (version 0 sentinel). The Go control
+    // plane fills it via `PushSnapshot` (spec §12B). Constructed BEFORE the
+    // KeyVault service because the S3 dual-defense (constitution XX) requires
+    // the KeyVault to read `key_owners` from the live snapshot on each
+    // `view_plaintext` Decrypt: `SnapshotOwnerLookup` wraps this same holder
+    // (AWS KMS pattern: Rust holds the owner mapping independently of Go).
     let holder = Arc::new(pingogate_snapshot::SnapshotHolder::empty());
-    let snapshot_source = Arc::new(pingogate_storage::GrpcSnapshotSource::new(holder));
+    let snapshot_source = Arc::new(pingogate_storage::GrpcSnapshotSource::new(holder.clone()));
+
+    // AES-GCM KeyVault + gRPC service, shared (via Arc) with the hot-path
+    // KeyVault trait wrapper (S3). `SnapshotOwnerLookup` gives the KeyVault
+    // independent read access to `key_owners` (S3 dual-defense, constitution XX).
+    let keyvault = Arc::new(pingogate_keyvault::AesGcmKeyVault::from_master_key(&mkek));
+    let owner_lookup: Arc<dyn pingogate_keyvault::OwnerLookup> =
+        Arc::new(grpc::SnapshotOwnerLookup::new(holder));
+    let keyvault_service =
+        pingogate_keyvault::KeyVaultGrpcService::new(keyvault, owner_lookup);
 
     let addr_str = grpc_addr_from_args();
     let addr = SocketAddr::from_str(&addr_str)

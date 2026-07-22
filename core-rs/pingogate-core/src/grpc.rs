@@ -41,7 +41,7 @@ use pingogate::{
     Snapshot, UsageEvent,
 };
 use pingogate_keyvault::{
-    proto::key_vault_service_server::KeyVaultServiceServer, KeyVaultGrpcService,
+    proto::key_vault_service_server::KeyVaultServiceServer, KeyVaultGrpcService, OwnerLookup,
 };
 
 /// Real S2 `SnapshotService`: drains the client-streaming `PushSnapshot` flow,
@@ -160,6 +160,33 @@ impl HealthService for HealthServiceImpl {
             ready,
             version: snap.version,
         }))
+    }
+}
+
+/// `OwnerLookup` impl backed by the live [`SnapshotHolder`] (S3 dual-defense,
+/// constitution XX). The KeyVaultGrpcService holds an `Arc<dyn OwnerLookup>`
+/// that points at this struct; each `view_plaintext` Decrypt loads the current
+/// snapshot via `ArcSwap` and reads `key_owners[key_id]`. Because the holder
+/// is the same one the `SnapshotService` swaps into, the owner check always
+/// uses the latest pushed owner mapping - Go cannot bypass it by crafting the
+/// request (AWS KMS pattern: Rust holds the authorization mapping
+/// independently of the caller).
+pub struct SnapshotOwnerLookup {
+    holder: Arc<SnapshotHolder>,
+}
+
+impl SnapshotOwnerLookup {
+    pub fn new(holder: Arc<SnapshotHolder>) -> Self {
+        Self { holder }
+    }
+}
+
+impl OwnerLookup for SnapshotOwnerLookup {
+    fn owner_of(&self, key_id: &str) -> Option<String> {
+        // ArcSwap load is a single atomic pointer read - cheap enough to do
+        // per Decrypt (cold path for view_plaintext; hot_path_inject skips the
+        // owner check entirely).
+        self.holder.load().key_owners.get(key_id).cloned()
     }
 }
 
