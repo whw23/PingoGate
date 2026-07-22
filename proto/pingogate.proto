@@ -62,8 +62,15 @@ message EncryptedProviderKey {
 }
 
 message VirtualKeyEntry {
-  // S3 填充,S2 留空消息
   string id = 1;
+  string token_hash = 2;        // bcrypt 或 SHA-256 hash
+  string owner_user_id = 3;
+  string provider_key_id = 4;   // 引用 encrypted_keys 的 key_id
+  repeated string allowed_models = 5;
+  repeated string allowed_providers = 6;
+  int64 expires_at = 7;         // unix ts,0 = 不过期
+  int32 max_concurrency = 8;    // 并发配额,0 = 不限
+  bool enabled = 9;
 }
 
 message Ack {
@@ -116,5 +123,17 @@ message DecryptResponse {
 
 message UsageEvent {
   uint64 version = 1;
-  bytes payload = 2;  // S3 扩展为结构化 usage
+  string virtual_key_id = 2;
+  string owner_user_id = 3;
+  string provider = 4;
+  string model = 5;
+  int64 input_tokens = 6;
+  int64 output_tokens = 7;
+  int64 reasoning_tokens = 8;
+  int64 cache_read_tokens = 9;
+  int64 cache_write_tokens = 10;
+  bool success = 11;
+  int64 latency_ms = 12;
+  bool needs_estimate = 13;     // true = 无 usage,Go 估算(Rust 推 body)
+  bytes body_ref = 14;          // needs_estimate=true 时的 body 引用/内容
 }

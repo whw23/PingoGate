@@ -320,11 +320,18 @@ func (x *EncryptedProviderKey) GetCreatedBy() string {
 }
 
 type VirtualKeyEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// S3 填充,S2 留空消息
-	Id            string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	TokenHash        string                 `protobuf:"bytes,2,opt,name=token_hash,json=tokenHash,proto3" json:"token_hash,omitempty"` // bcrypt 或 SHA-256 hash
+	OwnerUserId      string                 `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	ProviderKeyId    string                 `protobuf:"bytes,4,opt,name=provider_key_id,json=providerKeyId,proto3" json:"provider_key_id,omitempty"` // 引用 encrypted_keys 的 key_id
+	AllowedModels    []string               `protobuf:"bytes,5,rep,name=allowed_models,json=allowedModels,proto3" json:"allowed_models,omitempty"`
+	AllowedProviders []string               `protobuf:"bytes,6,rep,name=allowed_providers,json=allowedProviders,proto3" json:"allowed_providers,omitempty"`
+	ExpiresAt        int64                  `protobuf:"varint,7,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`                // unix ts,0 = 不过期
+	MaxConcurrency   int32                  `protobuf:"varint,8,opt,name=max_concurrency,json=maxConcurrency,proto3" json:"max_concurrency,omitempty"` // 并发配额,0 = 不限
+	Enabled          bool                   `protobuf:"varint,9,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *VirtualKeyEntry) Reset() {
@@ -362,6 +369,62 @@ func (x *VirtualKeyEntry) GetId() string {
 		return x.Id
 	}
 	return ""
+}
+
+func (x *VirtualKeyEntry) GetTokenHash() string {
+	if x != nil {
+		return x.TokenHash
+	}
+	return ""
+}
+
+func (x *VirtualKeyEntry) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *VirtualKeyEntry) GetProviderKeyId() string {
+	if x != nil {
+		return x.ProviderKeyId
+	}
+	return ""
+}
+
+func (x *VirtualKeyEntry) GetAllowedModels() []string {
+	if x != nil {
+		return x.AllowedModels
+	}
+	return nil
+}
+
+func (x *VirtualKeyEntry) GetAllowedProviders() []string {
+	if x != nil {
+		return x.AllowedProviders
+	}
+	return nil
+}
+
+func (x *VirtualKeyEntry) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *VirtualKeyEntry) GetMaxConcurrency() int32 {
+	if x != nil {
+		return x.MaxConcurrency
+	}
+	return 0
+}
+
+func (x *VirtualKeyEntry) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
 }
 
 type Ack struct {
@@ -886,11 +949,23 @@ func (x *DecryptResponse) GetError() string {
 }
 
 type UsageEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Version       uint64                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"` // S3 扩展为结构化 usage
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Version          uint64                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	VirtualKeyId     string                 `protobuf:"bytes,2,opt,name=virtual_key_id,json=virtualKeyId,proto3" json:"virtual_key_id,omitempty"`
+	OwnerUserId      string                 `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	Provider         string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
+	Model            string                 `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
+	InputTokens      int64                  `protobuf:"varint,6,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens     int64                  `protobuf:"varint,7,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	ReasoningTokens  int64                  `protobuf:"varint,8,opt,name=reasoning_tokens,json=reasoningTokens,proto3" json:"reasoning_tokens,omitempty"`
+	CacheReadTokens  int64                  `protobuf:"varint,9,opt,name=cache_read_tokens,json=cacheReadTokens,proto3" json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64                  `protobuf:"varint,10,opt,name=cache_write_tokens,json=cacheWriteTokens,proto3" json:"cache_write_tokens,omitempty"`
+	Success          bool                   `protobuf:"varint,11,opt,name=success,proto3" json:"success,omitempty"`
+	LatencyMs        int64                  `protobuf:"varint,12,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
+	NeedsEstimate    bool                   `protobuf:"varint,13,opt,name=needs_estimate,json=needsEstimate,proto3" json:"needs_estimate,omitempty"` // true = 无 usage,Go 估算(Rust 推 body)
+	BodyRef          []byte                 `protobuf:"bytes,14,opt,name=body_ref,json=bodyRef,proto3" json:"body_ref,omitempty"`                    // needs_estimate=true 时的 body 引用/内容
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UsageEvent) Reset() {
@@ -930,9 +1005,93 @@ func (x *UsageEvent) GetVersion() uint64 {
 	return 0
 }
 
-func (x *UsageEvent) GetPayload() []byte {
+func (x *UsageEvent) GetVirtualKeyId() string {
 	if x != nil {
-		return x.Payload
+		return x.VirtualKeyId
+	}
+	return ""
+}
+
+func (x *UsageEvent) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *UsageEvent) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *UsageEvent) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *UsageEvent) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *UsageEvent) GetOutputTokens() int64 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *UsageEvent) GetReasoningTokens() int64 {
+	if x != nil {
+		return x.ReasoningTokens
+	}
+	return 0
+}
+
+func (x *UsageEvent) GetCacheReadTokens() int64 {
+	if x != nil {
+		return x.CacheReadTokens
+	}
+	return 0
+}
+
+func (x *UsageEvent) GetCacheWriteTokens() int64 {
+	if x != nil {
+		return x.CacheWriteTokens
+	}
+	return 0
+}
+
+func (x *UsageEvent) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UsageEvent) GetLatencyMs() int64 {
+	if x != nil {
+		return x.LatencyMs
+	}
+	return 0
+}
+
+func (x *UsageEvent) GetNeedsEstimate() bool {
+	if x != nil {
+		return x.NeedsEstimate
+	}
+	return false
+}
+
+func (x *UsageEvent) GetBodyRef() []byte {
+	if x != nil {
+		return x.BodyRef
 	}
 	return nil
 }
@@ -969,9 +1128,19 @@ const file_pingogate_proto_rawDesc = "" +
 	"ciphertext\x12\"\n" +
 	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12\x1d\n" +
 	"\n" +
-	"created_by\x18\x04 \x01(\tR\tcreatedBy\"!\n" +
+	"created_by\x18\x04 \x01(\tR\tcreatedBy\"\xc2\x02\n" +
 	"\x0fVirtualKeyEntry\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"E\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"token_hash\x18\x02 \x01(\tR\ttokenHash\x12\"\n" +
+	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12&\n" +
+	"\x0fprovider_key_id\x18\x04 \x01(\tR\rproviderKeyId\x12%\n" +
+	"\x0eallowed_models\x18\x05 \x03(\tR\rallowedModels\x12+\n" +
+	"\x11allowed_providers\x18\x06 \x03(\tR\x10allowedProviders\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\a \x01(\x03R\texpiresAt\x12'\n" +
+	"\x0fmax_concurrency\x18\b \x01(\x05R\x0emaxConcurrency\x12\x18\n" +
+	"\aenabled\x18\t \x01(\bR\aenabled\"E\n" +
 	"\x03Ack\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\x04R\aversion\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
@@ -1006,11 +1175,25 @@ const file_pingogate_proto_rawDesc = "" +
 	"\x06intent\x18\x04 \x01(\tR\x06intent\"E\n" +
 	"\x0fDecryptResponse\x12\x1c\n" +
 	"\tplaintext\x18\x01 \x01(\fR\tplaintext\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"@\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xea\x03\n" +
 	"\n" +
 	"UsageEvent\x12\x18\n" +
-	"\aversion\x18\x01 \x01(\x04R\aversion\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload2\xcc\x01\n" +
+	"\aversion\x18\x01 \x01(\x04R\aversion\x12$\n" +
+	"\x0evirtual_key_id\x18\x02 \x01(\tR\fvirtualKeyId\x12\"\n" +
+	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12\x1a\n" +
+	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x14\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\x12!\n" +
+	"\finput_tokens\x18\x06 \x01(\x03R\vinputTokens\x12#\n" +
+	"\routput_tokens\x18\a \x01(\x03R\foutputTokens\x12)\n" +
+	"\x10reasoning_tokens\x18\b \x01(\x03R\x0freasoningTokens\x12*\n" +
+	"\x11cache_read_tokens\x18\t \x01(\x03R\x0fcacheReadTokens\x12,\n" +
+	"\x12cache_write_tokens\x18\n" +
+	" \x01(\x03R\x10cacheWriteTokens\x12\x18\n" +
+	"\asuccess\x18\v \x01(\bR\asuccess\x12\x1d\n" +
+	"\n" +
+	"latency_ms\x18\f \x01(\x03R\tlatencyMs\x12%\n" +
+	"\x0eneeds_estimate\x18\r \x01(\bR\rneedsEstimate\x12\x19\n" +
+	"\bbody_ref\x18\x0e \x01(\fR\abodyRef2\xcc\x01\n" +
 	"\x0fSnapshotService\x125\n" +
 	"\fPushSnapshot\x12\x13.pingogate.Snapshot\x1a\x0e.pingogate.Ack(\x01\x12F\n" +
 	"\tHeartbeat\x12\x1b.pingogate.HeartbeatRequest\x1a\x1c.pingogate.HeartbeatResponse\x12:\n" +
