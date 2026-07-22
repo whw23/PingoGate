@@ -21,6 +21,7 @@ pub mod router;
 pub mod streaming;
 pub mod upstream_auth;
 pub mod upstream_peer;
+pub mod usage_extractor;
 pub mod virtual_key_auth;
 pub mod wire;
 

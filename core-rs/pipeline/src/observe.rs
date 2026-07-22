@@ -1,47 +1,33 @@
 //! Per-request observability wiring (FR-031/FR-032; constitution XIX/XX).
 //!
-//! Keeps metric recording, the bounded token-usage capture, and the
+//! Keeps metric recording, the inline usage-extractor tap, and the
 //! trace-spanned completion log out of `proxy.rs` so the `ProxyHttp` stage
-//! wiring stays focused. Nothing here persists request/response content: the
-//! response capture is transient and capped, dropped once usage is parsed
-//! (constitution XX).
+//! wiring stays focused. Token-usage extraction is O(1) memory
+//! ([`crate::usage_extractor`]); nothing here persists request/response
+//! content (constitution XX).
 
 use bytes::Bytes;
 
 use pingogate_core_types::{record_facets, request_span};
-use pingogate_provider::parse_usage;
 
 use crate::ctx::GatewayCtx;
 use crate::logging::CompletionLog;
 use crate::metrics::{Metrics, RequestRecord};
 
-/// Upper bound on bytes captured from a response solely to read token usage.
-const MAX_USAGE_CAPTURE: usize = 256 * 1024;
-
-/// Append a response chunk to the bounded usage-capture buffer. Once the cap is
-/// exceeded the buffer is dropped and capture stops (token usage is then unknown
-/// for this request rather than risking unbounded memory).
-pub(crate) fn capture_chunk(ctx: &mut GatewayCtx, chunk: &Bytes) {
-    if ctx.acc_truncated || ctx.streaming {
-        return;
-    }
-    if ctx.response_acc.len() + chunk.len() > MAX_USAGE_CAPTURE {
-        ctx.acc_truncated = true;
-        ctx.response_acc = Vec::new();
-        return;
-    }
-    ctx.response_acc.extend_from_slice(chunk);
-}
-
-/// Parse token usage from the captured response, then release the buffer.
-/// Streaming or over-cap responses yield no usage.
-pub(crate) fn finish_capture(ctx: &mut GatewayCtx) {
-    if !ctx.streaming && !ctx.acc_truncated {
-        if let Some(protocol) = ctx.protocol {
-            ctx.tokens = parse_usage(protocol, &ctx.response_acc).filter(|u| !u.is_empty());
+/// Tap a response body chunk for inline usage extraction. Called from
+/// `response_body_filter` on every chunk; safe when no extractor is
+/// initialized (unrouted/error requests).
+pub(crate) fn tap_body_chunk(ctx: &mut GatewayCtx, body: &Option<Bytes>, end_of_stream: bool) {
+    if let Some(chunk) = body.as_ref() {
+        if let Some(ex) = ctx.usage_extractor.as_mut() {
+            ex.on_body_chunk(chunk, end_of_stream);
         }
     }
-    ctx.response_acc = Vec::new();
+    if end_of_stream {
+        if let Some(ex) = ctx.usage_extractor.as_mut() {
+            ctx.tokens = ex.finalize().filter(|u| !u.is_empty());
+        }
+    }
 }
 
 /// Emit the trace-spanned completion log and record metrics for the request.

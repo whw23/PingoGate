@@ -3,8 +3,7 @@
 //! Fixed pipeline: protocol -> auth -> routing -> upstream-auth -> SSE
 //! passthrough -> mirrored error -> observability. Each request is pinned to
 //! its `new_ctx` snapshot (FR-021). Dual mode (XII): `keyvault: None`
-//! (standalone, env plaintext) vs `Some` (platform, per-request AES-GCM
-//! decrypt, constitution XX).
+//! (standalone) vs `Some` (platform, per-request AES-GCM decrypt, XX).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,6 +26,7 @@ use crate::protocol::{self, Detected, Detection};
 use crate::streaming;
 use crate::upstream_auth::{UpstreamAuth, GATEWAY_KEY_HEADERS};
 use crate::upstream_peer::{resolve_route, UpstreamTarget};
+use crate::usage_extractor::UsageExtractor;
 use crate::wire;
 
 /// The gateway proxy. Mode (XII): `keyvault: None` = standalone;
@@ -166,8 +166,8 @@ impl ProxyHttp for GatewayProxy {
         }
     }
 
-    /// Tap the response stream to capture token usage without altering the
-    /// bytes relayed to the client (constitution XX).
+    /// Tap the response stream to extract token usage inline (constitution
+    /// XX/XXI; O(1) memory via [`UsageExtractor`]).
     fn response_body_filter(
         &self,
         _session: &mut Session,
@@ -175,18 +175,13 @@ impl ProxyHttp for GatewayProxy {
         end_of_stream: bool,
         ctx: &mut Self::CTX,
     ) -> Result<Option<Duration>> {
-        if let Some(chunk) = body.as_ref() {
-            observe::capture_chunk(ctx, chunk);
-        }
-        if end_of_stream {
-            observe::finish_capture(ctx);
-        }
+        observe::tap_body_chunk(ctx, body, end_of_stream);
         Ok(None)
     }
 
     async fn logging(&self, session: &mut Session, e: Option<&Error>, ctx: &mut Self::CTX) {
         // Release per-request auth state (VirtualKeyAuth concurrency counter).
-        // `logging` fires on both success and error; idempotent via Option::take.
+        // `logging` fires on both success and error; idempotent via take().
         ctx.release_auth();
 
         let status = session
@@ -249,7 +244,8 @@ async fn prepare(
     }
 }
 
-/// Record the resolved route and streaming flag on the request context.
+/// Record the resolved route, streaming flag, and usage extractor on the
+/// request context.
 fn commit_route(
     ctx: &mut GatewayCtx,
     detected: Detected,
@@ -262,15 +258,18 @@ fn commit_route(
     ctx.protocol = Some(detected.protocol);
     ctx.request.protocol = Some(detected.protocol);
     ctx.request.provider = Some(provider.clone());
-    // This phase serves a single capability family; label metrics by it (FR-033).
+    // Single capability family this phase; label metrics by it (FR-033).
     ctx.request.capability_family = Some(CapabilityFamily::GenerationStateless);
     ctx.route_provider = Some(provider);
     ctx.upstream = Some(target);
+    // Spin up the inline usage extractor now that the protocol is known.
+    // Stays `None` for unrouted/error requests (body filter is a no-op then).
+    ctx.usage_extractor = Some(UsageExtractor::new(detected.protocol));
 }
 
-/// Build the upstream auth plan, branching on mode (constitution XII/ XX).
-/// Platform (`Some(kv)`): per-request decrypt of `encrypted_key`. Standalone
-/// (`None`): env-resolved plaintext from `provider.key`.
+/// Build the upstream auth plan, branching on mode (constitution XII/XX).
+/// Platform: per-request decrypt of `encrypted_key`. Standalone: env-resolved
+/// plaintext from `provider.key`.
 fn build_upstream_auth(
     keyvault: &Option<Arc<dyn KeyVault>>,
     provider: &pingogate_snapshot::ResolvedProvider,

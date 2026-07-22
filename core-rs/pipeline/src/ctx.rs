@@ -2,10 +2,10 @@
 //!
 //! [`GatewayCtx`] is pinned to the snapshot it loaded at request start, so a
 //! concurrent reload never disturbs an in-flight request (FR-021). It also
-//! carries the observability fields (timers, a bounded transient response
-//! capture for token parsing, parsed token counts) consumed in
-//! [`crate::observe`]. Extracted from `proxy.rs` to keep that module focused on
-//! the `ProxyHttp` stage wiring (constitution: file ≤300 lines).
+//! carries the observability fields (timers, an inline O(1)-memory usage
+//! extractor, parsed token counts) consumed in [`crate::observe`]. Extracted
+//! from `proxy.rs` to keep that module focused on the `ProxyHttp` stage
+//! wiring (constitution: file ≤300 lines).
 //!
 //! Authentication is delegated to a [`KeyAuth`](crate::key_auth::KeyAuth) impl
 //! injected at construction, so the pipeline does not inline gateway-key
@@ -24,6 +24,7 @@ use pingogate_snapshot::RuntimeSnapshot;
 use crate::auth_filter;
 use crate::key_auth::KeyAuth;
 use crate::upstream_peer::UpstreamTarget;
+use crate::usage_extractor::UsageExtractor;
 
 /// Per-request state shared across pipeline phases.
 pub struct GatewayCtx {
@@ -50,11 +51,11 @@ pub struct GatewayCtx {
     pub(crate) started: Instant,
     /// Upstream send time, for upstream latency.
     pub(crate) upstream_started: Option<Instant>,
-    /// Bounded, transient response capture used only to parse token usage -
-    /// never persisted and dropped at request end (constitution XX).
-    pub(crate) response_acc: Vec<u8>,
-    /// Set once the capture exceeds its cap; token parsing is then skipped.
-    pub(crate) acc_truncated: bool,
+    /// Inline streaming usage extractor (O(1) memory). Replaces the previous
+    /// bounded response-capture buffer. Initialized once the inbound protocol
+    /// is identified in `request_filter`; remains `None` for unrouted/error
+    /// requests where no upstream body will be observed.
+    pub(crate) usage_extractor: Option<UsageExtractor>,
     /// Token counts parsed from the upstream response, when available.
     pub(crate) tokens: Option<TokenUsage>,
 }
@@ -75,8 +76,7 @@ impl GatewayCtx {
             streaming: false,
             started: Instant::now(),
             upstream_started: None,
-            response_acc: Vec::new(),
-            acc_truncated: false,
+            usage_extractor: None,
             tokens: None,
         }
     }
