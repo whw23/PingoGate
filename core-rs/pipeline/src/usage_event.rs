@@ -72,11 +72,18 @@ pub(crate) fn build_usage_event(ctx: &GatewayCtx, status: u16) -> Option<UsageEv
     let latency_ms = ctx.started.elapsed().as_millis() as u64;
     let success = (200..300).contains(&status);
 
+    // Surface the resolved upstream model (not the alias) so the Go estimator
+    // can pick the correct tokenizer encoding (e.g. gpt-4 vs gpt-4o). Falls
+    // back to empty only when no route resolved - but in that case
+    // build_usage_event returns None above (provider is None), so this is
+    // purely defensive.
+    let model = ctx.route_model.clone().unwrap_or_default();
+
     Some(UsageEvent {
         virtual_key_id,
         owner_user_id,
         provider,
-        model: String::new(),
+        model,
         input_tokens: input,
         output_tokens: output,
         reasoning_tokens: reasoning,
@@ -166,5 +173,28 @@ mod tests {
         // The body should be wrapped in a JSON envelope.
         let parsed: serde_json::Value = serde_json::from_slice(&event.body_ref).unwrap();
         assert!(parsed.get("request").is_some());
+    }
+
+    #[test]
+    fn build_usage_event_surfaces_route_model() {
+        // T31 fix: model field must carry the resolved upstream_model (not
+        // empty) so the Go estimator can pick the correct tokenizer encoding.
+        let mut ctx = empty_ctx();
+        ctx.route_provider = Some("openai".to_string());
+        ctx.route_model = Some("gpt-4o".to_string());
+        let event = build_usage_event(&ctx, 200).unwrap();
+        assert_eq!(event.model, "gpt-4o");
+    }
+
+    #[test]
+    fn build_usage_event_model_defaults_empty_without_route_model() {
+        // Defensive: if route_model is None (shouldn't happen when a route
+        // resolved, but guard anyway), the model field is empty rather than
+        // panicking.
+        let mut ctx = empty_ctx();
+        ctx.route_provider = Some("openai".to_string());
+        // route_model intentionally left None
+        let event = build_usage_event(&ctx, 200).unwrap();
+        assert_eq!(event.model, "");
     }
 }

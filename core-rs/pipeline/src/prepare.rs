@@ -65,8 +65,8 @@ pub(crate) async fn prepare(
     };
 
     match resolve_route(&ctx.snapshot, &alias) {
-        Ok((provider, target)) => {
-            commit_route(ctx, detected, provider, target, body);
+        Ok((provider, upstream_model, target)) => {
+            commit_route(ctx, detected, provider, upstream_model, target, body);
             Ok(None)
         }
         Err(err) => Ok(Some((protocol, err))),
@@ -81,6 +81,7 @@ pub(crate) fn commit_route(
     ctx: &mut GatewayCtx,
     detected: Detected,
     provider: String,
+    upstream_model: String,
     target: UpstreamTarget,
     body: Option<Vec<u8>>,
 ) {
@@ -91,6 +92,7 @@ pub(crate) fn commit_route(
     ctx.request.provider = Some(provider.clone());
     ctx.request.capability_family = Some(CapabilityFamily::GenerationStateless);
     ctx.route_provider = Some(provider);
+    ctx.route_model = Some(upstream_model);
     ctx.upstream = Some(target);
     ctx.usage_extractor = Some(UsageExtractor::new(detected.protocol));
     if ctx.streaming && detected.protocol == ProtocolKind::OpenAiCompatible {

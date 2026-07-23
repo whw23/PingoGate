@@ -1,15 +1,10 @@
 //! PingoGate Rust kernel binary - composition root (constitution VIII).
 //!
-//! Bootstrap order: init tracing -> resolve config path -> build the initial
-//! [`RuntimeSnapshot`] via [`FileSnapshotSource`] (T4 abstraction, standalone
-//! mode) -> read `PINGO_ADMIN_TOKEN` (R1: missing = authed endpoints reject) ->
-//! assemble the public + admin Pingora services -> run. The Pingora server owns
-//! its own runtime, so `main` stays synchronous.
-//!
-//! Platform mode (S2+): `PINGO_MODE=platform` starts the gRPC server (mTLS +
-//! internal token, spec §12A) that accepts snapshot pushes from the Go control
-//! plane. S1 only ships a stub server to prove connectivity (T11); real
-//! snapshot application lands in S2.
+//! Bootstrap: init tracing -> resolve config -> build `RuntimeSnapshot` via
+//! `FileSnapshotSource` (standalone) -> read `PINGO_ADMIN_TOKEN` (R1) ->
+//! assemble Pingora services -> run. Platform mode (`PINGO_MODE=platform`)
+//! starts the gRPC server (mTLS + internal token, spec §12A) accepting
+//! snapshot pushes from the Go control plane.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -35,14 +30,13 @@ mod watch;
 
 /// Default config file name when `--config` is not given.
 const DEFAULT_CONFIG_PATH: &str = "pingogate-core.yaml";
-/// Env var holding the standalone-mode admin token (R1).
+/// Env var: standalone-mode admin token (R1). Missing = authed endpoints reject.
 const ADMIN_TOKEN_ENV: &str = "PINGO_ADMIN_TOKEN";
 /// Opt-in file-watch interval, in seconds.
 const WATCH_INTERVAL_ENV: &str = "PINGO_WATCH_INTERVAL_SECS";
 /// Env var selecting standalone vs platform bootstrap (`standalone` | `platform`).
 const MODE_ENV: &str = "PINGO_MODE";
-/// Env var holding the shared gRPC internal token (spec §12A). Required in
-/// platform mode; fatal if missing.
+/// Env var: shared gRPC internal token (spec §12A). Required in platform mode.
 const INTERNAL_TOKEN_ENV: &str = "PINGO_INTERNAL_TOKEN";
 /// Env var: path to the server (Rust) TLS certificate PEM (platform mode).
 const GRPC_CERT_ENV: &str = "PINGO_GRPC_CERT";
@@ -50,15 +44,12 @@ const GRPC_CERT_ENV: &str = "PINGO_GRPC_CERT";
 const GRPC_KEY_ENV: &str = "PINGO_GRPC_KEY";
 /// Env var: path to the CA certificate PEM that signed the Go client cert.
 const GRPC_CA_ENV: &str = "PINGO_GRPC_CA";
-/// Env var holding the 32-byte AES-GCM master key (constitution XX KeyVault).
-/// Required in platform mode; missing or not exactly 32 bytes is fatal. The
-/// key encrypts provider keys at rest (Go DB) and decrypts them once per
-/// hot-path request inside the Rust kernel.
+/// Env var: 32-byte AES-GCM master key (constitution XX KeyVault). Required
+/// in platform mode; missing or not exactly 32 bytes is fatal.
 const MKEK_ENV: &str = "PINGO_MKEK";
 /// Default gRPC listen address when `--grpc-addr` is not given (platform mode).
 const DEFAULT_GRPC_ADDR: &str = "127.0.0.1:9091";
-/// Env var holding the Go UsageService gRPC address (T31). The Rust kernel
-/// dials this address to push UsageEvents. Defaults to 127.0.0.1:9092.
+/// Env var: Go UsageService gRPC address (T31). Defaults to 127.0.0.1:9092.
 const USAGE_GRPC_ADDR_ENV: &str = "PINGO_USAGE_GRPC_ADDR";
 /// Default Go UsageService gRPC address (T31).
 const DEFAULT_USAGE_GRPC_ADDR: &str = "127.0.0.1:9092";
@@ -66,8 +57,7 @@ const DEFAULT_USAGE_GRPC_ADDR: &str = "127.0.0.1:9092";
 fn main() {
     init_tracing();
     if let Err(e) = run() {
-        // Startup failures are fatal; no secret material is included in error
-        // values (constitution XX).
+        // Startup failures are fatal; no secret material in error (constitution XX).
         eprintln!("pingogate-core failed to start: {e}");
         std::process::exit(1);
     }
@@ -122,7 +112,6 @@ fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
     let mut server = Server::new(None)?;
     server.bootstrap();
 
-    // One metrics registry, shared between the data plane and the Admin API.
     let metrics = Arc::new(Metrics::new());
     let auth: Arc<dyn pingogate_pipeline::KeyAuth> = Arc::new(StaticKeyAuth);
 
@@ -131,11 +120,8 @@ fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
         holder: holder.clone(),
         metrics: metrics.clone(),
         auth,
-        // Standalone mode: no KeyVault; provider keys are env-resolved
-        // plaintext on the snapshot (constitution XII).
-        keyvault: None,
-        // Standalone mode: no Go control plane to push usage to.
-        usage: None,
+        keyvault: None, // standalone: env-resolved plaintext keys (constitution XII)
+        usage: None,    // standalone: no Go control plane to push usage to
         address: &public_addr,
     });
     let admin = build_admin_service(AdminServiceConfig {
@@ -153,16 +139,11 @@ fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Platform mode: start the gRPC server (mTLS + internal token) that accepts
-/// snapshot pushes + KeyVault Encrypt/Decrypt calls from the Go control plane.
-/// S2 ships the real AES-GCM KeyVault (loaded from `PINGO_MKEK`) and the real
-/// `SnapshotService` (proto `Snapshot` -> `RuntimeSnapshot` -> `ArcSwap`). The
-/// `HealthService` reports `ready: false` until the first snapshot is applied
-/// (spec §12B). S3+ will also run the Pingora data plane alongside the gRPC
-/// server; S2 runs the gRPC server only.
+/// snapshot pushes + KeyVault calls from Go. S2 ships the AES-GCM KeyVault
+/// (from `PINGO_MKEK`) and `SnapshotService`. S3+ adds the Pingora data plane.
 fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     // rustls 0.23 requires a process-wide CryptoProvider. Install the `ring`
-    // provider before tonic's TLS stack touches rustls. Safe to call once at
-    // startup; a second install returns Err which we ignore (idempotent intent).
+    // provider before tonic's TLS stack touches rustls (idempotent).
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let internal_token = std::env::var(INTERNAL_TOKEN_ENV).map_err(|_| {
@@ -185,22 +166,20 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| format!("{GRPC_CA_ENV} is required in platform mode"))?,
     );
 
-    // Load the 32-byte master key (PINGO_MKEK). Missing or wrong length is
-    // fatal (constitution XX). No secret material in the error value.
+    // Load the 32-byte master key (PINGO_MKEK). Missing/wrong length is fatal.
     let mkek = load_master_key()?;
 
-    // Platform-mode snapshot holder (version 0 sentinel). The Go control
-    // plane fills it via `PushSnapshot` (spec §12B). Constructed BEFORE the
-    // KeyVault service because the S3 dual-defense (constitution XX) requires
+    // Platform-mode snapshot holder (version 0 sentinel). Constructed BEFORE
+    // the KeyVault service: the S3 dual-defense (constitution XX) requires
     // the KeyVault to read `key_owners` from the live snapshot on each
-    // `view_plaintext` Decrypt: `SnapshotOwnerLookup` wraps this same holder
-    // (AWS KMS pattern: Rust holds the owner mapping independently of Go).
+    // `view_plaintext` Decrypt (AWS KMS pattern: Rust holds the owner
+    // mapping independently of Go).
     let holder = Arc::new(pingogate_snapshot::SnapshotHolder::empty());
     let snapshot_source = Arc::new(pingogate_storage::GrpcSnapshotSource::new(holder.clone()));
 
-    // AES-GCM KeyVault + gRPC service, shared (via Arc) with the hot-path
-    // KeyVault trait wrapper (S3). `SnapshotOwnerLookup` gives the KeyVault
-    // independent read access to `key_owners` (S3 dual-defense, constitution XX).
+    // AES-GCM KeyVault + gRPC service, shared with the hot-path KeyVault
+    // trait wrapper (S3). `SnapshotOwnerLookup` gives the KeyVault
+    // independent read access to `key_owners` (dual-defense, constitution XX).
     let keyvault = Arc::new(pingogate_keyvault::AesGcmKeyVault::from_master_key(&mkek));
     let owner_lookup: Arc<dyn pingogate_keyvault::OwnerLookup> =
         Arc::new(grpc::SnapshotOwnerLookup::new(holder));
@@ -211,12 +190,8 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from_str(&addr_str)
         .map_err(|e| format!("invalid gRPC address '{addr_str}': {e}"))?;
 
-    // T31: construct the UsageService gRPC client (Rust -> Go). The Go
-    // control plane serves UsageService on 127.0.0.1:9092 (default) with
-    // mTLS + the shared internal token. The Rust kernel pushes one
-    // UsageEvent per request via this client. Failure to construct is
-    // non-fatal: the pipeline falls back to a no-op reporter so a Go
-    // outage does not block the data plane (constitution XXI).
+    // T31: build the UsageService gRPC client (Rust -> Go). Connect + fallback
+    // lives in usage_client::build_reporter (T31 fix #2: constitution V).
     let usage_addr = std::env::var(USAGE_GRPC_ADDR_ENV)
         .unwrap_or_else(|_| DEFAULT_USAGE_GRPC_ADDR.to_string());
     let usage_cert = server_cert.to_string_lossy().to_string();
@@ -228,32 +203,14 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        // Try to connect the usage reporter; log and fall back to no-op on
-        // failure. The data plane stays usable either way.
-        let usage_reporter: Arc<dyn pingogate_pipeline::UsageReporter> =
-            match usage_client::GrpcUsageReporter::connect(
-                &usage_addr,
-                &usage_cert,
-                &usage_key,
-                &usage_ca,
-                &usage_token,
-            )
-            .await
-            {
-                Ok(reporter) => {
-                    tracing::info!(usage_addr = %usage_addr, "UsageService gRPC client connected");
-                    Arc::new(reporter)
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        usage_addr = %usage_addr,
-                        "UsageService gRPC client connect failed; falling back to no-op reporter"
-                    );
-                    Arc::new(pingogate_pipeline::NoopUsageReporter)
-                }
-            };
-        let _usage_reporter = usage_reporter; // used when data plane lands in platform mode
+        let _usage_reporter = usage_client::GrpcUsageReporter::build_reporter(
+            &usage_addr,
+            &usage_cert,
+            &usage_key,
+            &usage_ca,
+            &usage_token,
+        )
+        .await; // used when data plane lands in platform mode
         grpc::serve_grpc(
             addr,
             server_cert,
@@ -268,37 +225,31 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Resolve the config path from `--config <path>` / `--config=<path>`, defaulting
-/// to `pingogate-core.yaml` in the working directory.
+/// Resolve `--config <path>` / `--config=<path>`, defaulting to
+/// `pingogate-core.yaml` in the working directory.
 fn config_path_from_args() -> String {
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if arg == "--config" {
-            if let Some(path) = args.next() {
-                return path;
-            }
-        } else if let Some(path) = arg.strip_prefix("--config=") {
-            return path.to_string();
-        }
-    }
-    DEFAULT_CONFIG_PATH.to_string()
+    arg_value("--config").unwrap_or_else(|| DEFAULT_CONFIG_PATH.to_string())
 }
 
-/// Resolve the gRPC listen address from `--grpc-addr <addr>` /
-/// `--grpc-addr=<addr>`, defaulting to `127.0.0.1:9091` (spec §12A: loopback
-/// only). Used in platform mode.
+/// Resolve `--grpc-addr <addr>` / `--grpc-addr=<addr>`, defaulting to
+/// `127.0.0.1:9091` (spec §12A: loopback only). Used in platform mode.
 fn grpc_addr_from_args() -> String {
+    arg_value("--grpc-addr").unwrap_or_else(|| DEFAULT_GRPC_ADDR.to_string())
+}
+
+/// Shared `--flag <value>` / `--flag=<value>` parser. Returns the first match.
+fn arg_value(flag: &str) -> Option<String> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--grpc-addr" {
-            if let Some(addr) = args.next() {
-                return addr;
+        if arg == flag {
+            if let Some(v) = args.next() {
+                return Some(v);
             }
-        } else if let Some(addr) = arg.strip_prefix("--grpc-addr=") {
-            return addr.to_string();
+        } else if let Some(v) = arg.strip_prefix(&format!("{flag}=")) {
+            return Some(v.to_string());
         }
     }
-    DEFAULT_GRPC_ADDR.to_string()
+    None
 }
 
 /// Read the admin token from the environment (R1). Returns `None` when unset or
@@ -311,9 +262,8 @@ fn read_admin_token() -> Option<SecretString> {
 }
 
 /// Load the 32-byte AES-GCM master key (`PINGO_MKEK`) from the environment
-/// (platform mode). The env var's UTF-8 bytes are taken as the raw 32-byte key;
-/// missing, empty, or not exactly 32 bytes is fatal. The error message carries
-/// no secret material (constitution XX).
+/// (platform mode). Missing, empty, or not exactly 32 bytes is fatal. No
+/// secret material in the error value (constitution XX).
 fn load_master_key() -> Result<[u8; 32], Box<dyn std::error::Error>> {
     let raw = std::env::var(MKEK_ENV).map_err(|_| {
         format!("{MKEK_ENV} is required in platform mode (32-byte AES-GCM master key)")
@@ -337,9 +287,9 @@ fn init_tracing() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
-/// Parse the opt-in file-watch interval from `PINGO_WATCH_INTERVAL_SECS`. A
-/// missing, zero, or unparseable value disables the watcher; SIGHUP and the
-/// Admin API remain available as reload triggers.
+/// Parse the opt-in file-watch interval from `PINGO_WATCH_INTERVAL_SECS`.
+/// Missing, zero, or unparseable disables the watcher; SIGHUP and Admin API
+/// remain available as reload triggers.
 fn watch_interval_from_env() -> Option<Duration> {
     std::env::var(WATCH_INTERVAL_ENV)
         .ok()?

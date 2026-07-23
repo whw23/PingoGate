@@ -44,6 +44,12 @@ pub struct GatewayCtx {
     pub(crate) protocol: Option<ProtocolKind>,
     /// Resolved upstream provider name.
     pub(crate) route_provider: Option<String>,
+    /// Resolved upstream model name (the provider's actual model, not the
+    /// alias). Populated in `commit_route` from `Route::upstream_model` and
+    /// surfaced to the Go usage estimator via `UsageEvent::model` so it can
+    /// pick the correct tokenizer encoding (e.g. gpt-4 vs gpt-4o). `None`
+    /// only when no route resolved.
+    pub(crate) route_model: Option<String>,
     /// Resolved upstream connection target.
     pub(crate) upstream: Option<UpstreamTarget>,
     /// Whether this exchange is a stream (observability marker).
@@ -84,6 +90,7 @@ impl GatewayCtx {
             authenticated_principal: None,
             protocol: None,
             route_provider: None,
+            route_model: None,
             upstream: None,
             streaming: false,
             started: Instant::now(),

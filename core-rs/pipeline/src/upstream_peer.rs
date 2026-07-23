@@ -53,12 +53,15 @@ pub fn parse_base_url(base_url: &str) -> Result<UpstreamTarget, AppError> {
     })
 }
 
-/// Resolve a model alias to its provider name and connectable target, enforcing
-/// the provider's declared capability gate (FR-006/FR-007).
+/// Resolve a model alias to its provider name, upstream model name, and
+/// connectable target, enforcing the provider's declared capability gate
+/// (FR-006/FR-007). The returned `upstream_model` is the provider's actual
+/// model name (not the alias) and is surfaced to the Go usage estimator so
+/// it can pick the correct tokenizer encoding.
 pub fn resolve_route(
     snapshot: &RuntimeSnapshot,
     alias: &str,
-) -> Result<(String, UpstreamTarget), AppError> {
+) -> Result<(String, String, UpstreamTarget), AppError> {
     let route = snapshot.route(alias).ok_or_else(|| AppError::NoRoute {
         alias: alias.to_string(),
     })?;
@@ -80,7 +83,7 @@ pub fn resolve_route(
         });
     }
     let target = parse_base_url(&provider.base_url)?;
-    Ok((route.provider.clone(), target))
+    Ok((route.provider.clone(), route.upstream_model.clone(), target))
 }
 
 #[cfg(test)]
