@@ -12,6 +12,7 @@ pingogate-storage = { path = "../storage" }
 pingogate-provider = { path = "../provider" }
 pingogate-transform = { path = "../transform" }
 pingora = { workspace = true }
+tokio = { workspace = true }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
 http = { workspace = true }

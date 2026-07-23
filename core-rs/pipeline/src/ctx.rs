@@ -65,6 +65,11 @@ pub struct GatewayCtx {
     /// body with this version (which has `stream_options.include_usage: true`
     /// injected). `None` for non-OpenAI / non-streaming requests.
     pub(crate) injected_request_body: Option<Bytes>,
+    /// Stashed request body for usage estimation (T31). Populated in
+    /// `commit_route` when the body is drained for model extraction. Sent
+    /// to Go as `body_ref` when `needs_estimate=true` (no provider usage).
+    /// Cleared after the usage push; never persisted (constitution XX).
+    pub(crate) request_body_for_usage: Option<Vec<u8>>,
 }
 
 impl GatewayCtx {
@@ -86,6 +91,7 @@ impl GatewayCtx {
             usage_extractor: None,
             tokens: None,
             injected_request_body: None,
+            request_body_for_usage: None,
         }
     }
 

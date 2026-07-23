@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::Bytes;
-use pingogate_core_types::{AppError, CapabilityFamily, ProtocolKind, TraceId, TRACE_HEADER};
+use pingogate_core_types::{AppError, TraceId, TRACE_HEADER};
 use pingogate_snapshot::SnapshotHolder;
 use pingogate_storage::KeyVault;
 use pingora::http::{RequestHeader, ResponseHeader};
@@ -20,11 +20,11 @@ use crate::ctx::GatewayCtx;
 use crate::key_auth::KeyAuth;
 use crate::metrics::Metrics;
 use crate::observe;
-use crate::protocol::{self, Detected, Detection};
+use crate::prepare::prepare;
 use crate::streaming;
 use crate::upstream_auth::GATEWAY_KEY_HEADERS;
-use crate::upstream_peer::{resolve_route, UpstreamTarget};
-use crate::usage_extractor::UsageExtractor;
+use crate::usage_event::build_usage_event;
+use crate::usage_reporter::UsageReporter;
 use crate::wire;
 
 /// The gateway proxy. Mode (XII): `keyvault: None` = standalone;
@@ -34,26 +34,42 @@ pub struct GatewayProxy {
     metrics: Arc<Metrics>,
     auth: Arc<dyn KeyAuth>,
     keyvault: Option<Arc<dyn KeyVault>>,
+    usage: Arc<dyn UsageReporter>,
 }
 
 impl GatewayProxy {
-    /// Standalone-mode construct: env-resolved plaintext keys, no KeyVault.
+    /// Standalone-mode construct: env-resolved plaintext keys, no KeyVault,
+    /// no usage push (NoopUsageReporter).
     pub fn new(
         holder: Arc<SnapshotHolder>,
         metrics: Arc<Metrics>,
         auth: Arc<dyn KeyAuth>,
     ) -> Self {
-        Self { holder, metrics, auth, keyvault: None }
+        Self {
+            holder,
+            metrics,
+            auth,
+            keyvault: None,
+            usage: Arc::new(crate::usage_reporter::NoopUsageReporter),
+        }
     }
 
-    /// Platform-mode construct: per-request KeyVault decrypt (constitution XX).
+    /// Platform-mode construct: per-request KeyVault decrypt (constitution XX)
+    /// and usage push to the Go control plane via the injected reporter.
     pub fn new_platform(
         holder: Arc<SnapshotHolder>,
         metrics: Arc<Metrics>,
         auth: Arc<dyn KeyAuth>,
         keyvault: Arc<dyn KeyVault>,
+        usage: Arc<dyn UsageReporter>,
     ) -> Self {
-        Self { holder, metrics, auth, keyvault: Some(keyvault) }
+        Self {
+            holder,
+            metrics,
+            auth,
+            keyvault: Some(keyvault),
+            usage,
+        }
     }
 }
 
@@ -209,90 +225,19 @@ impl ProxyHttp for GatewayProxy {
             .map(|resp| resp.status.as_u16())
             .unwrap_or(0);
         let error = e.map(|e| e.to_string());
+
+        // Push usage to the Go control plane (T31). Fire-and-forget: the
+        // reporter logs failures and never blocks the hot path. Built here
+        // (before observe::complete finalizes) so the event carries the
+        // merged token counts. Skipped when no route resolved (auth
+        // failures, unknown protocols) - nothing to bill.
+        if let Some(event) = build_usage_event(ctx, status) {
+            let reporter = self.usage.clone();
+            // Spawn a detached task so the Pingora worker is not blocked on
+            // the gRPC push. The reporter enforces its own internal timeout.
+            tokio::spawn(async move { reporter.report(event).await });
+        }
+
         observe::complete(&self.metrics, ctx, status, error.as_deref().unwrap_or("none"));
-    }
-}
-
-/// Identify, authenticate, and route the request. Returns `Some((protocol,
-/// err))` to short-circuit with a mirrored error, or `None` to proceed.
-async fn prepare(
-    session: &mut Session,
-    ctx: &mut GatewayCtx,
-) -> Result<Option<(Option<ProtocolKind>, AppError)>> {
-    let req = session.req_header();
-    let method = req.method.as_str().to_string();
-    let path = req.uri.path_and_query().map(|pq| pq.as_str().to_string()).unwrap_or_default();
-    let authz = wire::header_str(req, "authorization");
-    let x_api_key = wire::header_str(req, "x-api-key");
-
-    let detection = protocol::detect(&method, &path);
-    let protocol = wire::detection_protocol(&detection);
-    let detected: Detected = match detection {
-        Detection::Unidentified => return Ok(Some((None, AppError::UnknownProtocol))),
-        Detection::UnsupportedCapability { family, .. } => {
-            if let Some(err) = ctx.authenticate(authz.as_deref(), x_api_key.as_deref()) {
-                return Ok(Some((protocol, err)));
-            }
-            return Ok(Some((protocol, AppError::UnsupportedCapability { family })));
-        }
-        Detection::Supported(detected) => detected,
-    };
-
-    if let Some(err) = ctx.authenticate(authz.as_deref(), x_api_key.as_deref()) {
-        return Ok(Some((protocol, err)));
-    }
-
-    let (model, body) = match wire::extract_model_and_body(session, detected.protocol, &path).await
-    {
-        Ok(pair) => pair,
-        Err(err) => return Ok(Some((protocol, err))),
-    };
-    let Some(alias) = model else {
-        let err = AppError::Validation {
-            message: "request is missing the 'model' field".to_string(),
-        };
-        return Ok(Some((protocol, err)));
-    };
-
-    match resolve_route(&ctx.snapshot, &alias) {
-        Ok((provider, target)) => {
-            commit_route(ctx, detected, provider, target, body);
-            Ok(None)
-        }
-        Err(err) => Ok(Some((protocol, err))),
-    }
-}
-
-/// Record the resolved route, streaming flag, and usage extractor on the
-/// request context. For OpenAI Chat streaming, pre-computes the injected body
-/// (T28: `stream_options.include_usage`) so `upstream_request_filter` can set
-/// `Content-Length` before headers ship (Pingora sends headers before body).
-fn commit_route(
-    ctx: &mut GatewayCtx,
-    detected: Detected,
-    provider: String,
-    target: UpstreamTarget,
-    body: Option<Vec<u8>>,
-) {
-    ctx.streaming =
-        streaming::request_is_streaming(detected.streaming_by_path, body.as_deref().unwrap_or(b""));
-    ctx.protocol = Some(detected.protocol);
-    ctx.request.protocol = Some(detected.protocol);
-    ctx.request.provider = Some(provider.clone());
-    ctx.request.capability_family = Some(CapabilityFamily::GenerationStateless);
-    ctx.route_provider = Some(provider);
-    ctx.upstream = Some(target);
-    ctx.usage_extractor = Some(UsageExtractor::new(detected.protocol));
-    if ctx.streaming && detected.protocol == ProtocolKind::OpenAiCompatible {
-        if let Some(b) = body.as_deref() {
-            let injected = pingogate_transform::inject_include_usage(
-                b,
-                ProtocolKind::OpenAiCompatible,
-                true,
-            );
-            if injected != b {
-                ctx.injected_request_body = Some(Bytes::from(injected));
-            }
-        }
     }
 }

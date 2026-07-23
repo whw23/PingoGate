@@ -75,8 +75,34 @@ func TestOpenAndMigrate(t *testing.T) {
 		if err := db.Get(&count, "SELECT COUNT(*) FROM schema_migrations"); err != nil {
 			t.Fatalf("count schema_migrations: %v", err)
 		}
-		if want := 4; count != want {
+		if want := 5; count != want {
 			t.Fatalf("schema_migrations count = %d, want %d", count, want)
+		}
+	})
+
+	t.Run("usage_table_exists", func(t *testing.T) {
+		var name string
+		err := db.Get(&name,
+			"SELECT name FROM sqlite_master WHERE type='table' AND name='usage'")
+		if err != nil {
+			t.Fatalf("usage table not created: %v", err)
+		}
+		if name != "usage" {
+			t.Fatalf("got name=%q, want %q", name, "usage")
+		}
+	})
+
+	t.Run("usage_indexes_exist", func(t *testing.T) {
+		for _, idx := range []string{"idx_usage_owner", "idx_usage_created"} {
+			var name string
+			err := db.Get(&name,
+				"SELECT name FROM sqlite_master WHERE type='index' AND name = ?", idx)
+			if err != nil {
+				t.Fatalf("index %s not created: %v", idx, err)
+			}
+			if name != idx {
+				t.Fatalf("got index name=%q, want %q", name, idx)
+			}
 		}
 	})
 

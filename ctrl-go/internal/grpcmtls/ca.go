@@ -114,10 +114,17 @@ func generateCA() (*ecdsa.PrivateKey, []byte, error) {
 }
 
 // generateAndWriteLeaf creates a leaf cert signed by the CA and writes cert+key.
-// isClient=true sets ExtKeyUsage ClientAuth (for Go ctrl), false sets ServerAuth
-// (for Rust core). Both IP 127.0.0.1 and DNS localhost are in the SANs so the
-// cert validates for the loopback gRPC listener.
+// Both leaves are dual-usage (ClientAuth + ServerAuth) so either side can act
+// as gRPC server or client on the loopback channel (T31: Go now serves the
+// UsageService gRPC server that the Rust kernel dials as a client). Both IP
+// 127.0.0.1 and DNS localhost are in the SANs so the cert validates for the
+// loopback gRPC listener.
+//
+// The isClient parameter is retained for API stability but no longer affects
+// ExtKeyUsage; both leaves get ClientAuth+ServerAuth. This is acceptable for
+// a loopback-only internal channel (spec §12A) behind a shared CA.
 func generateAndWriteLeaf(dir, certName, keyName, cn string, caCert []byte, caKey *ecdsa.PrivateKey, isClient bool) error {
+	_ = isClient // retained for API stability; both leaves are dual-usage now.
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return err
@@ -133,18 +140,13 @@ func generateAndWriteLeaf(dir, certName, keyName, cn string, caCert []byte, caKe
 		return err
 	}
 
-	extKeyUsage := []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-	if isClient {
-		extKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
-	}
-
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: cn},
 		NotBefore:    time.Now().Add(-time.Minute),
 		NotAfter:     time.Now().AddDate(10, 0, 0),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  extKeyUsage,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
 		DNSNames:     []string{"localhost"},
 	}

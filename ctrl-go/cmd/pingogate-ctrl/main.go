@@ -19,6 +19,8 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -32,6 +34,7 @@ import (
 	pb "github.com/whw23/pingogate/ctrl-go/internal/proto"
 	"github.com/whw23/pingogate/ctrl-go/internal/snapshot"
 	"github.com/whw23/pingogate/ctrl-go/internal/storage"
+	"github.com/whw23/pingogate/ctrl-go/internal/usage"
 	"github.com/whw23/pingogate/ctrl-go/internal/vkey"
 )
 
@@ -72,6 +75,15 @@ const httpAddrEnv = "PINGO_HTTP_ADDR"
 // defaultHTTPAddr is the default HTTP listen address when PINGO_HTTP_ADDR is
 // unset. S2 is single-node; L4+ multi-tenant puts this behind a load balancer.
 const defaultHTTPAddr = ":8080"
+
+// Default gRPC server address for the UsageService that Go serves (T31). The
+// Rust kernel dials this address to push UsageEvents. Loopback-only (spec
+// §12A). Separate from the Rust-dial port 9091 because Go now serves in
+// addition to being a client.
+const defaultUsageGrpcAddr = "127.0.0.1:9092"
+
+// Env var for the UsageService gRPC listen address. Defaults to 9092.
+const usageGrpcAddrEnv = "PINGO_USAGE_GRPC_ADDR"
 
 func main() {
 	internalToken := os.Getenv(internalTokenEnv)
@@ -169,11 +181,62 @@ func main() {
 	vkeyStore := vkey.NewStore(db)
 	vkey.RegisterRoutes(r, vkeyStore, pusher)
 
+	// T31: start the UsageService gRPC server (Rust -> Go). The Rust kernel
+	// dials this address to push UsageEvents; Go persists them to the DB
+	// (and runs the tiktoken-go estimator when needs_estimate=true). The
+	// server runs on its own goroutine; the main goroutine continues to
+	// serve HTTP. A failure to start the gRPC server is fatal: without it
+	// no usage is recorded and billing is blind.
+	usageAddr := usageGrpcAddrFromEnv()
+	usageStore := usage.NewStore(db)
+	usageEstimator := usage.NewEstimator()
+	usageServer := usage.NewServer(usageStore, usageEstimator, slog.Default())
+	if err := startUsageGrpcServer(usageAddr, certsDir, internalToken, usageServer); err != nil {
+		log.Fatalf("start UsageService gRPC server: %v", err)
+	}
+	log.Printf("UsageService gRPC listening on %s", usageAddr)
+
 	httpAddr := httpAddrFromEnv()
 	log.Printf("control-plane HTTP listening on %s", httpAddr)
 	if err := http.ListenAndServe(httpAddr, r); err != nil {
 		log.Fatalf("HTTP server: %v", err)
 	}
+}
+
+// startUsageGrpcServer binds the UsageService gRPC server on addr with mTLS
+// (ctrl cert as server identity, CA-verifies the Rust client cert) + the
+// shared-token interceptor (spec §12A). Runs in a background goroutine; the
+// caller does not block. Returns an error if the listener cannot bind.
+func startUsageGrpcServer(addr, certsDir, internalToken string, srv *usage.Server) error {
+	creds, err := grpcmtls.ServerCredentials(certsDir)
+	if err != nil {
+		return err
+	}
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	gs := grpc.NewServer(
+		grpc.Creds(creds),
+		grpc.UnaryInterceptor(grpcmtls.TokenServerInterceptor(internalToken)),
+		grpc.StreamInterceptor(grpcmtls.TokenStreamServerInterceptor(internalToken)),
+	)
+	pb.RegisterUsageServiceServer(gs, srv)
+	go func() {
+		if err := gs.Serve(lis); err != nil {
+			log.Fatalf("UsageService gRPC server: %v", err)
+		}
+	}()
+	return nil
+}
+
+// usageGrpcAddrFromEnv reads the UsageService gRPC listen address from
+// PINGO_USAGE_GRPC_ADDR, defaulting to 127.0.0.1:9092 (spec §12A: loopback).
+func usageGrpcAddrFromEnv() string {
+	if addr := os.Getenv(usageGrpcAddrEnv); addr != "" {
+		return addr
+	}
+	return defaultUsageGrpcAddr
 }
 
 // grpcAddrFromEnv reads the gRPC target from PINGO_GRPC_ADDR, defaulting to

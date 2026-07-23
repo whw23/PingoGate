@@ -30,6 +30,7 @@ use tracing_subscriber::EnvFilter;
 mod grpc;
 mod grpc_auth;
 mod signal;
+mod usage_client;
 mod watch;
 
 /// Default config file name when `--config` is not given.
@@ -56,6 +57,11 @@ const GRPC_CA_ENV: &str = "PINGO_GRPC_CA";
 const MKEK_ENV: &str = "PINGO_MKEK";
 /// Default gRPC listen address when `--grpc-addr` is not given (platform mode).
 const DEFAULT_GRPC_ADDR: &str = "127.0.0.1:9091";
+/// Env var holding the Go UsageService gRPC address (T31). The Rust kernel
+/// dials this address to push UsageEvents. Defaults to 127.0.0.1:9092.
+const USAGE_GRPC_ADDR_ENV: &str = "PINGO_USAGE_GRPC_ADDR";
+/// Default Go UsageService gRPC address (T31).
+const DEFAULT_USAGE_GRPC_ADDR: &str = "127.0.0.1:9092";
 
 fn main() {
     init_tracing();
@@ -128,6 +134,8 @@ fn run_standalone() -> Result<(), Box<dyn std::error::Error>> {
         // Standalone mode: no KeyVault; provider keys are env-resolved
         // plaintext on the snapshot (constitution XII).
         keyvault: None,
+        // Standalone mode: no Go control plane to push usage to.
+        usage: None,
         address: &public_addr,
     });
     let admin = build_admin_service(AdminServiceConfig {
@@ -203,18 +211,60 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from_str(&addr_str)
         .map_err(|e| format!("invalid gRPC address '{addr_str}': {e}"))?;
 
+    // T31: construct the UsageService gRPC client (Rust -> Go). The Go
+    // control plane serves UsageService on 127.0.0.1:9092 (default) with
+    // mTLS + the shared internal token. The Rust kernel pushes one
+    // UsageEvent per request via this client. Failure to construct is
+    // non-fatal: the pipeline falls back to a no-op reporter so a Go
+    // outage does not block the data plane (constitution XXI).
+    let usage_addr = std::env::var(USAGE_GRPC_ADDR_ENV)
+        .unwrap_or_else(|_| DEFAULT_USAGE_GRPC_ADDR.to_string());
+    let usage_cert = server_cert.to_string_lossy().to_string();
+    let usage_key = server_key.to_string_lossy().to_string();
+    let usage_ca = client_ca.to_string_lossy().to_string();
+    let usage_token = internal_token.clone();
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(grpc::serve_grpc(
-        addr,
-        server_cert,
-        server_key,
-        client_ca,
-        internal_token,
-        keyvault_service,
-        snapshot_source,
-    ))?;
+    runtime.block_on(async move {
+        // Try to connect the usage reporter; log and fall back to no-op on
+        // failure. The data plane stays usable either way.
+        let usage_reporter: Arc<dyn pingogate_pipeline::UsageReporter> =
+            match usage_client::GrpcUsageReporter::connect(
+                &usage_addr,
+                &usage_cert,
+                &usage_key,
+                &usage_ca,
+                &usage_token,
+            )
+            .await
+            {
+                Ok(reporter) => {
+                    tracing::info!(usage_addr = %usage_addr, "UsageService gRPC client connected");
+                    Arc::new(reporter)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        usage_addr = %usage_addr,
+                        "UsageService gRPC client connect failed; falling back to no-op reporter"
+                    );
+                    Arc::new(pingogate_pipeline::NoopUsageReporter)
+                }
+            };
+        let _usage_reporter = usage_reporter; // used when data plane lands in platform mode
+        grpc::serve_grpc(
+            addr,
+            server_cert,
+            server_key,
+            client_ca,
+            internal_token,
+            keyvault_service,
+            snapshot_source,
+        )
+        .await
+    })?;
     Ok(())
 }
 

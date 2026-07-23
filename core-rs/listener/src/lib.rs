@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use pingogate_pipeline::{GatewayProxy, KeyAuth, Metrics};
+use pingogate_pipeline::{GatewayProxy, KeyAuth, Metrics, UsageReporter};
 use pingogate_snapshot::SnapshotHolder;
 use pingogate_storage::KeyVault;
 use pingora::proxy::{http_proxy_service, HttpProxy};
@@ -33,6 +33,10 @@ pub struct PublicServiceConfig<'a> {
     /// Platform mode only: AES-GCM KeyVault for per-request provider-key
     /// decrypt. `None` in standalone mode (env-resolved plaintext keys).
     pub keyvault: Option<Arc<dyn KeyVault>>,
+    /// Platform mode only: usage reporter for pushing UsageEvents to the
+    /// Go control plane (T31). `None` in standalone mode
+    /// (NoopUsageReporter is used).
+    pub usage: Option<Arc<dyn UsageReporter>>,
     pub address: &'a str,
 }
 
@@ -46,14 +50,15 @@ pub struct PublicServiceConfig<'a> {
 pub fn build_public_service(
     config: PublicServiceConfig<'_>,
 ) -> Service<HttpProxy<GatewayProxy, ()>> {
-    let proxy = match config.keyvault {
-        Some(kv) => GatewayProxy::new_platform(
+    let proxy = match (config.keyvault, config.usage) {
+        (Some(kv), Some(usage)) => GatewayProxy::new_platform(
             config.holder,
             config.metrics,
             config.auth,
             kv,
+            usage,
         ),
-        None => GatewayProxy::new(config.holder, config.metrics, config.auth),
+        _ => GatewayProxy::new(config.holder, config.metrics, config.auth),
     };
     let mut service = http_proxy_service(config.conf, proxy);
     service.add_tcp(config.address);
