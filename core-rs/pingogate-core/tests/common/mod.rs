@@ -12,6 +12,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
 pub mod client;
+pub mod closure;
 pub mod mock;
 
 use std::io::Write;
