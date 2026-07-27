@@ -428,3 +428,19 @@ Rust 内核与 Go 非内核间的 gRPC（快照推送 / KeyVault 加解密 / usa
 5. **Platform data plane wired in `platform.rs`**：S3 验收时 `run_platform` 仅启动 gRPC server 未接 Pingora 数据面（T32 documented gap）。post-S3 任务（commit `3c49b93`）把 `run_platform` 提取至 `core-rs/pingogate-core/src/platform.rs`（268 行），gRPC server 跑后台线程 + 独立 tokio runtime，Pingora 数据面（public + admin listeners）跑前台 `run_forever`；VirtualKeyAuth + 第二个 `AesGcmKeyVault`（同 mkek、无状态）+ usage_reporter 全部装配。**解锁 SC-1/3/7/10/11 平台路径**，12/12 SC 全 PASS。
 6. **Mutex replaced with Semaphore for usage reporter**：usage reporter（Rust -> Go UsageService stream）原设计用 mutex 串行化推送，实现期改为 Semaphore（16 push cap，drop-on-full）。**理由**：mutex 在推送激增时序列化等待，可能资源耗尽；Semaphore 限制并发上限 16，满时 drop 新推送（fail-open，usage 是尽力而为的计量信号，非强一致）。**资源改进**，接受偏差（T31 fix commit `54c9849`）。**注**：snapshot 推送仍用 mutex（T20），因 snapshot 需要严格串行化 + ack 校验，不可 drop。
 7. **MKEK as UTF-8 env bytes**：主密钥 `PINGO_MKEK` 作为 UTF-8 字节读取（32-char ASCII，~208 bits 熵），而非 hex/base64 解码（256 bits）。**理由**：32-char ASCII 已提供 ~208 bits 熵，远超 AES-256 安全裕度；UTF-8 直接读取避免编码/解码复杂度与潜在误配置。**可接受**，接受偏差（T15 minor）。
+
+## Final Whole-Branch Review Conclusion
+
+Architecture-level review (post-36-task SDD) verdict: **Ready to merge**.
+
+- **0 Critical** (no merge blockers)
+- **4 Important** (acknowledged follow-ups, non-blocking):
+  1. e2e_m0m1_closure test step 5/9 stale (says BLOCKED but platform data plane wired in 3c49b93). SC-1/3/7/10/11 platform-path verification is by **code inspection**, not actual e2e test run. Fast-follow: update e2e to exercise wired path.
+  2. Go HTTP server has no timeouts (ReadHeaderTimeout/WriteTimeout). L4+ production hardening.
+  3. vkey revokeHandler lacks ownership check (L0 admin-only OK; L4 multi-tenant fix).
+  4. VirtualKeyAuth concurrency counter relies on Pingora  hook firing (design constraint, documented; Pingora guarantees this).
+- **5 Minor**: dead UsageEvent.version; serde_yaml unmaintained; file size proximity to 300; writeJSON swallows errors; pusher context bounded by client.
+- **Constitution**: all 22 principles pass. One justified  in  (constitution III carve-out for XX zeroing).
+- **Security**: dual-defense genuinely independent (L1 Go DB vs L2 Rust snapshot, different sources). mTLS + constant-time token all 4 directions. No plaintext leak.
+- **Cross-language**: proto consistent, SHA-256 cross-validated, snapshot conversion correct.
+- **Hot-path**: zero DB, per-request decrypt ~0.2us no cache, Semaphore-capped fire-and-forget, idempotent concurrency release.
