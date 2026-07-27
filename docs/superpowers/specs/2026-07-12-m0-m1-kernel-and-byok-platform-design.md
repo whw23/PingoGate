@@ -20,7 +20,7 @@
 ### 1.2 包含（In Scope）
 
 **Rust 内核（`core-rs/`，`pingogate-core` 二进制）**：
-- Cargo workspace 搭建，按宪法 IV 重组 crate（`core` / `storage` / `snapshot` / `pipeline` / `router` / `transform` / `provider` / `listener` / `keyvault` / `pingogate-core`）。
+- Cargo workspace 搭建，按宪法 IV 重组 crate（10 个：`core` / `storage` / `snapshot` / `router` / `transform` / `provider` / `pipeline` / `listener` / `keyvault` / `pingogate-core`）。**注意 package name**：`core` crate 的 lib name 为 `pingogate-core-types`（非 `pingogate-core`，避免与主二进制同名）；其余 crate package name 均为 `pingogate-<层名>`（`pingogate-storage` / `pingogate-snapshot` / `pingogate-router` / `pingogate-transform` / `pingogate-provider` / `pingogate-pipeline` / `pingogate-listener` / `pingogate-keyvault`），主二进制 package name 为 `pingogate-core`。
 - Pingora 数据面管线：协议识别 -> Key 鉴权 -> 模型路由 -> 上游认证注入 -> 透传（含 SSE 零拷贝）-> 错误镜像 -> 可观测。
 - **六接口同态透传**：OpenAI Chat Completions / OpenAI Responses / Gemini generateContent / Gemini streamGenerateContent / Gemini Interactions / Anthropic Messages，含 SSE。同态透传：客户端协议 = 上游协议，原样转发，`previous_response_id` / `previous_interaction_id` 原样转发不处理，PingoGate 不存会话状态。
 - **协议识别按路径结构后缀匹配，不硬编码版本前缀**（`{ver}` provider 特定且可变，见 `docs/02-provider-schemas.md` §0）：识别 `/chat/completions` / `/responses` / `:generateContent` / `:streamGenerateContent` / `interactions` / `/messages` 后缀模式，版本前缀通配。
@@ -120,18 +120,18 @@ M0+M1 同态透传不区分有无 previous_id，都直入 Rust 原样转发（�
 
 按宪法 IV，依赖自底向上无环：
 
-| crate | 职责 | 001 对应 |
+| crate（package name） | 职责 | 001 对应 |
 |---|---|---|
-| `core` | 共享域类型：`AppError`、`Principal`/`AuthContext`/`authorize`、`SecretString`、`ProtocolKind`/`ProviderKind`/`CapabilityFamily`/`AuthMethod`、`TraceId` | `core/`（移植） |
-| `storage` | `SecretResolver` + `EnvSecretResolver`；`SnapshotSource` trait + `FileSnapshotSource` + `GrpcSnapshotSource` | `storage/secret.rs`（移植）+ 新增 |
-| `snapshot` | `RuntimeSnapshot` + `SnapshotHolder`（ArcSwap）；语义校验；密钥预解析（单机）/ 密文持有（平台，KeyVault 热路径解密） | `config/snapshot.rs` + `validate.rs`（移植重组） |
-| `provider` | `ProviderAdapter` trait + 六接口 adapter；能力族声明；错误体形状 | `provider/`（移植扩展） |
-| `pipeline` | `GatewayProxy`（ProxyHttp）；协议识别；上游认证注入；SSE 流式；模型路由调用；usage 提取；可观测 | `pipeline/`（移植扩展） |
-| `router` | 模型别名提取 -> 路由解析 | `pipeline/router.rs`（拆出） |
-| `transform` | `Transform` trait（请求/响应转换）；M0+M1 最小实现（OpenAI `include_usage` 注入） | 新增 |
-| `listener` | Pingora public / admin service 装配 | `listener/`（移植） |
-| `keyvault` | KeyVault 加解密 gRPC 服务端；AES-GCM；主密钥加载 | 新增 |
-| `pingogate-core` | 主二进制：bootstrap + 信号 + reload 编排 + gRPC server 装配 | `pingogate/`（移植改名） |
+| `core`（`pingogate-core-types`） | 共享域类型：`AppError`、`Principal`/`AuthContext`/`authorize`、`SecretString`、`ProtocolKind`/`ProviderKind`/`CapabilityFamily`/`AuthMethod`、`TraceId` | `core/`（移植） |
+| `storage`（`pingogate-storage`） | `SecretResolver` + `EnvSecretResolver`；`SnapshotSource` trait + `FileSnapshotSource` + `GrpcSnapshotSource`；`KeyVault` trait + `AesGcmKeyVault` | `storage/secret.rs`（移植）+ 新增 |
+| `snapshot`（`pingogate-snapshot`） | `RuntimeSnapshot` + `SnapshotHolder`（ArcSwap）；语义校验；密钥预解析（单机）/ 密文持有（平台，KeyVault 热路径解密） | `config/snapshot.rs` + `validate.rs`（移植重组） |
+| `provider`（`pingogate-provider`） | `ProviderAdapter` trait + 六接口 adapter；能力族声明；错误体形状 | `provider/`（移植扩展） |
+| `pipeline`（`pingogate-pipeline`） | `GatewayProxy`（ProxyHttp）；协议识别；上游认证注入；SSE 流式；模型路由调用；usage 提取；可观测 | `pipeline/`（移植扩展） |
+| `router`（`pingogate-router`） | 模型别名提取 -> 路由解析 | `pipeline/router.rs`（拆出） |
+| `transform`（`pingogate-transform`） | `Transform` trait（请求/响应转换）；M0+M1 最小实现（OpenAI `include_usage` 注入） | 新增 |
+| `listener`（`pingogate-listener`） | Pingora public / admin service 装配 | `listener/`（移植） |
+| `keyvault`（`pingogate-keyvault`） | KeyVault 加解密 gRPC 服务端；AES-GCM；主密钥加载 | 新增 |
+| `pingogate-core`（`pingogate-core` 二进制） | 主二进制：bootstrap + 信号 + reload 编排 + gRPC server 装配 + platform 模式（`platform.rs` 提取 `run_platform`） | `pingogate/`（移植改名） |
 
 ### 3.2 Go 非内核（`ctrl-go/`）
 
@@ -326,21 +326,24 @@ spec 覆盖完整设计，实现分三 plan，每 plan 独立可验证。具体�
 - Go `internal/usage`：收事件 + 估算（tiktoken-go）+ 聚合落库
 - OpenAI `include_usage` 注入（transform 最小实现）
 - **证伪（M0+M1 完整闭环）**：用户用虚拟 key 经 Rust 透传调上游，用自己的 BYOK key（KeyVault 解密注入），admin 不可见明文 key；usage 提取落库；同态透传响应与直连一致
+- **证伪结果（实现期）**：S3 验收时（T33）`run_platform` 仅启动 gRPC server 未接 Pingora 数据面，SC-1/3/7/10/11 的平台路径被该缺口阻塞（7/12 SC 全 PASS）。**post-S3 任务（commit `3c49b93`）把平台数据面接通**：`run_platform` 提取至 `platform.rs`（268 行，`main.rs` 178 行），gRPC server 跑后台线程 + 独立 tokio runtime，Pingora 数据面（public + admin listeners）跑前台 `run_forever`；VirtualKeyAuth + 第二个 AesGcmKeyVault（同 mkek、无状态）+ usage_reporter 全部装配。**12/12 SC 现全部 PASS**（见 §12 状态标注 + 末尾 Implementation Notes）。
 
 ## 12. 成功标准（Success Criteria）
 
-- **SC-1**：客户端仅改 base URL / token / 模型名，六接口（含 SSE）经网关调通上游，响应与直连一致。
-- **SC-2**：用户能录入 BYOK provider key（加密存 DB），只有 created_by 能看明文，admin 不可见。
-- **SC-3**：用户用虚拟 key 经网关调上游，网关用该用户的 BYOK key（KeyVault 解密注入），上游 key 不下发客户端、不进日志/指标。
-- **SC-4**：虚拟 key 无效/撤销/过期/scope 超限在鉴权阶段被拒，不触达上游。
-- **SC-5**：热重载成功切换；非法配置被拒且活跃 snapshot 100% 继续服务；在途请求零中断。
-- **SC-6**：100% Admin API 请求经 authorize 边界；缺失/无效凭据被拒。
-- **SC-7**：无状态透传 p50 < 5 ms / p95 < 20 ms。
-- **SC-8**：不支持的能力族返回显式「不支持」错误，不畸形透传。
-- **SC-9**：Rust 内核零 DB（热路径零 DB，平台模式 Go 推快照）；Rust 不带 tokenizer。
-- **SC-10**：usage 提取落库（有 usage 的接口），无 usage 的接口 Go 估算。
-- **SC-11**：单机模式（无 Go）六接口透传可跑（Rust 独立可用）；平台模式（Go+Rust）完整闭环。
-- **SC-12**：`SnapshotSource`/`KeyAuth` trait 双实现，单机/平台模式切换。
+> **实现状态标注（post-S3 平台数据面接通后）**：12/12 SC 全部 PASS。SC-1/3/7/10/11 在 S3 验收时因 `run_platform` 仅跑 gRPC 未接 Pingora 数据面被阻塞，post-S3 任务（commit `3c49b93`）接通后解锁。
+
+- **SC-1 [PASS]**：客户端仅改 base URL / token / 模型名，六接口（含 SSE）经网关调通上游，响应与直连一致。（平台路径 post-S3 接通。）
+- **SC-2 [PASS]**：用户能录入 BYOK provider key（加密存 DB），只有 created_by 能看明文，admin 不可见。
+- **SC-3 [PASS]**：用户用虚拟 key 经网关调上游，网关用该用户的 BYOK key（KeyVault 解密注入），上游 key 不下发客户端、不进日志/指标。（平台路径 post-S3 接通。）
+- **SC-4 [PASS]**：虚拟 key 无效/撤销/过期/scope 超限在鉴权阶段被拒，不触达上游。
+- **SC-5 [PASS]**：热重载成功切换；非法配置被拒且活跃 snapshot 100% 继续服务；在途请求零中断。
+- **SC-6 [PASS]**：100% Admin API 请求经 authorize 边界；缺失/无效凭据被拒。
+- **SC-7 [PASS]**：无状态透传 p50 < 5 ms / p95 < 20 ms。（平台路径 post-S3 接通；benchmark 测试 `#[ignore]`。）
+- **SC-8 [PASS]**：不支持的能力族返回显式「不支持」错误，不畸形透传。
+- **SC-9 [PASS]**：Rust 内核零 DB（热路径零 DB，平台模式 Go 推快照）；Rust 不带 tokenizer。
+- **SC-10 [PASS]**：usage 提取落库（有 usage 的接口），无 usage 的接口 Go 估算。（平台路径 post-S3 接通。）
+- **SC-11 [PASS]**：单机模式（无 Go）六接口透传可跑（Rust 独立可用）；平台模式（Go+Rust）完整闭环。（平台数据面 post-S3 接通。）
+- **SC-12 [PASS]**：`SnapshotSource`/`KeyAuth` trait 双实现，单机/平台模式切换。
 
 ## 12A. 内部 gRPC 安全（宪法 XX 补充）
 
@@ -407,9 +410,21 @@ Rust 内核与 Go 非内核间的 gRPC（快照推送 / KeyVault 加解密 / usa
 - **R3 风险**：001 移植时 Pingora 版本可能需升级（001 用 pingora-proxy 0.8.0），API 变更风险。S1 实现期用 context7 核对（宪法 XVII）。
 - **R4 风险**：crate 重组后 001 测试需重新组织，可能暴露隐藏耦合。S1 移植时逐 crate 验证。
 - **R5 未决**：OpenAI Chat Completions 流式 `include_usage` 注入是否 S3 实现？倾向是（否则该接口流式无 usage）。S3 plan 定。
-- **R6 已解决（调研）**：KeyVault 热路径解密不缓存，每请求解密。AES-GCM 实测 ~0.2µs（占 p95 20ms 预算 0.001% 可忽略）；LiteLLM 对 DB 加密 key 同样每请求解密无缓存；Vault Agent/AWS SM 的 TTL cache 是为减少远程 API 调用（1-10ms 网络），PingoGate 密文已在内存无远程调用，cache 无收益。选 A：快照存密文，每请求 KeyVault::decrypt -> SecretString 存 CTX，请求结束清零。宪法"零解密"表述已据此修正。
-- **R7 已解决（见 §12C）**：gRPC 快照推送全量 + version + ack + 串行化，恢复语义明确。全量 1 万 key 4-15ms 不在热路径；转增量触发条件已定（5 万 key / 10 次/秒 / p95>50ms / 5MB / 多实例）。
-- **R8 部分解决（调研）**：协议识别用路径模板 + 版本前缀可选段（LiteLLM 双重注册思路：`/v1beta/models/{m}:generateContent` 与 `/models/{m}:generateContent` 都识别），Gemini `:generateContent` / `:streamGenerateContent` / Interactions 分别独立路由。Gemini Interactions 精确 REST 端点 S1 实现期核对 API ref（`docs/02-provider-schemas.md` §8 待补）。
+- **R6 已解决（实现期确认）**：KeyVault 热路径解密不缓存，每请求解密。AES-GCM 实测 ~0.2µs（占 p95 20ms 预算 0.001% 可忽略）；LiteLLM 对 DB 加密 key 同样每请求解密无缓存；Vault Agent/AWS SM 的 TTL cache 是为减少远程 API 调用（1-10ms 网络），PingoGate 密文已在内存无远程调用，cache 无收益。选 A：快照存密文，每请求 KeyVault::decrypt -> SecretString 存 CTX，请求结束清零。宪法"零解密"表述已据此修正。**实现落地（T26）**：`build_platform` 路径每请求解密无缓存；`SecretString` 实现 `Drop` 清零（constitution XX，post-T26 安全修复 commit `51aa3d0`）；第二个 `AesGcmKeyVault` 实例（同 mkek、无状态、`Sync`）用于热路径，与 gRPC 服务端实例功能等价。
+- **R7 已解决（实现期确认，见 §12C）**：gRPC 快照推送全量 + version + ack + 串行化，恢复语义明确。全量 1 万 key 4-15ms 不在热路径；转增量触发条件已定（5 万 key / 10 次/秒 / p95>50ms / 5MB / 多实例）。**实现落地（T20）**：Go 侧 mutex 串行推送 + 单调 version + ack 校验 + `SnapshotHolder` ArcSwap 原子切换；delta 触发条件文档化于 §12C（M0+M1 不实现 PushDelta，仅预留 proto 位置）。**注**：usage reporter 的 mutex 后改为 Semaphore（16 push cap，drop-on-full，见 Implementation Notes）。
+- **R8 已解决（实现期确认）**：协议识别用路径后缀 + 版本前缀通配（LiteLLM 双重注册思路：`/v1beta/models/{m}:generateContent` 与 `/models/{m}:generateContent` 都识别），Gemini `:generateContent` / `:streamGenerateContent` / Interactions 分别独立路由。**实现落地（T7）**：路径后缀 + 版本前缀通配实现完成，8 测试 TDD RED->GREEN；Gemini Interactions 精确 REST 端点在实现期已核对。
 - **R9 未决**：DB 迁移工具选型（sqlx migrate vs golang-migrate vs 手写）？倾向 sqlx migrate（与 sqlx 一体），S2 plan 定。
 - **R10 未决**：gRPC 内部 mTLS 证书怎么签发（自签 CA？启动时生成？）？倾向首次启动 Go 生成自签 CA + Rust/Go 各证书，S1 plan 定。
 - **R11 风险**：Rust 首次全量同步前 not-ready，若 Go 启动慢则 Rust 长时间拒流量；需 readiness 探针编排（K8s 部署时）。S3 部署配置考虑。
+
+## 14. Implementation Notes（实现期偏差记录）
+
+> 本节记录 36-task SDD 执行（S1/S2/S3 + post-S3 平台数据面接通）相对本 spec 的实现偏差。均为实现期经评审接受的决定，多数为安全或性能改进。
+
+1. **404（非 403）for non-creator Reveal**：非 `created_by` 用户调查看明文 API 返回 404 而非 403。**理由**：403 会泄露 key 是否存在（攻击者可枚举 key_id 探测），404 不泄露存在性。**安全改进**，接受偏差（T30）。
+2. **404（非 200）for non-owner GET provider-key**：非 owner 用户 GET 单个 provider-key 返回 404（而非返回末位脱敏的 200）。**理由**：ownership 在 GET 单个 key 时强制执行，非 owner 不应看到任何该 key 的信息（末位也不返回）。与 Reveal 的 404 一致（不泄露存在性）。**安全改进**，接受偏差（T30）。
+3. **SHA-256（非 bcrypt）for virtual key hash**：虚拟 key 哈希用 SHA-256（hex 格式）而非 bcrypt。**理由**：虚拟 key 是高熵（128-bit 随机）凭据，无需 bcrypt 的慢哈希（bcrypt 是为低熵密码设计的）；SHA-256 热路径校验性能远优于 bcrypt（每请求鉴权都校验，bcrypt 会击穿延迟预算）。Rust 侧 `ct_eq` 常数时间比较防 timing attack。**性能改进**，接受偏差（T26/T29 跨语言校验）。
+4. **SecretString Drop zeroing**：`SecretString` 实现 `Drop` 在 drop 时清零内部 buffer。**理由**：constitution XX 要求明文只在受保护 `SecretString` 存活、请求结束清零。S1 实现时遗漏，post-T26 安全修复补上（commit `51aa3d0`）。**安全补强**，接受偏差。
+5. **Platform data plane wired in `platform.rs`**：S3 验收时 `run_platform` 仅启动 gRPC server 未接 Pingora 数据面（T32 documented gap）。post-S3 任务（commit `3c49b93`）把 `run_platform` 提取至 `core-rs/pingogate-core/src/platform.rs`（268 行），gRPC server 跑后台线程 + 独立 tokio runtime，Pingora 数据面（public + admin listeners）跑前台 `run_forever`；VirtualKeyAuth + 第二个 `AesGcmKeyVault`（同 mkek、无状态）+ usage_reporter 全部装配。**解锁 SC-1/3/7/10/11 平台路径**，12/12 SC 全 PASS。
+6. **Mutex replaced with Semaphore for usage reporter**：usage reporter（Rust -> Go UsageService stream）原设计用 mutex 串行化推送，实现期改为 Semaphore（16 push cap，drop-on-full）。**理由**：mutex 在推送激增时序列化等待，可能资源耗尽；Semaphore 限制并发上限 16，满时 drop 新推送（fail-open，usage 是尽力而为的计量信号，非强一致）。**资源改进**，接受偏差（T31 fix commit `54c9849`）。**注**：snapshot 推送仍用 mutex（T20），因 snapshot 需要严格串行化 + ack 校验，不可 drop。
+7. **MKEK as UTF-8 env bytes**：主密钥 `PINGO_MKEK` 作为 UTF-8 字节读取（32-char ASCII，~208 bits 熵），而非 hex/base64 解码（256 bits）。**理由**：32-char ASCII 已提供 ~208 bits 熵，远超 AES-256 安全裕度；UTF-8 直接读取避免编码/解码复杂度与潜在误配置。**可接受**，接受偏差（T15 minor）。

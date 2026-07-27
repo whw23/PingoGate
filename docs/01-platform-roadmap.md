@@ -415,6 +415,14 @@ LiteLLM（蓝图 19）/ New API（蓝图 20）对齐清单作为产品覆盖度�
 
 ## 8. 当前状态
 
-- **当前轮次**：M0（内核单机网关）作为首个 feature spec，brainstorming / spec 编写中。数据面复用 001 已验证实现（移植到 `core-rs/`，做双模式 + 虚拟key 适配）。
-- **已完成**：仓库重置到 `dev` 分支（orphan，仅设计资产）；宪法定局双语言内核架构（Rust 内核 + Go 非内核，双运行模式）；路线图 L0-L6 + M0-M4；001 资产评估（数据面可借鉴）。
+- **当前轮次**：M0+M1（内核单机网关 + BYOK 密钥平台）**实现完成**。36-task SDD 执行（S1 12 + S2 10 + S3 13 + post-S3 平台数据面接通 1）全部完成，12/12 成功标准 PASS。数据面复用 001 已验证实现（移植到 `core-rs/`，做双模式 + 虚拟key 适配）。
+- **里程碑状态**：
+  - **M0（内核单机网关）**：✅ 完成（S1 12 tasks，单机模式六接口透传可跑，gRPC 连通性验证，契约套件就绪）。
+  - **M1（BYOK 密钥平台）**：✅ 完成（S2 10 tasks + S3 13 tasks + post-S3 平台数据面接通，用户身份 + BYOK key 加密保管 + 1Password 可见性双防线 + 虚拟 key 签发/撤销 + usage 提取落库 + 平台模式完整闭环）。
+  - **M2（BYOK 网关）**：✅ 实质完成（M0+M1 合并 spec 已包含 M2 的 L2 + L3 平台模式，12/12 SC PASS 包括平台模式数据面）。
+  - **M3（多租户治理）**：待启动（L4 + L5）。
+  - **M4（完整 SaaS 平台）**：待启动（L6）。
+- **实现期偏差**（详见 spec §14 Implementation Notes）：404（非 403）for non-creator Reveal（安全改进，避免 key-existence 泄露）；404（非 200）for non-owner GET provider-key（ownership 强制）；SHA-256（非 bcrypt）for virtual key hash（热路径性能，128-bit 熵凭据无需慢哈希）；SecretString Drop zeroing（constitution XX 安全补强）；platform data plane wired in `platform.rs`（gRPC 后台 + Pingora 前台）；Mutex replaced with Semaphore for usage reporter（16 push cap，drop-on-full）；MKEK as UTF-8 env bytes（32-char ASCII，~208 bits 熵）。
+- **已知非阻塞 follow-up**：(1) gRPC liveness -> readiness coupling（平台数据面 Important，gRPC 失败目前 log-only fail-closed 但无 readiness 耦合）；(2) T16 streaming push_snapshot 测试 deferred；(3) 跨 runtime tonic 集成测试（Go 端到端）；(4) 各 task review 的 Minor 项（cosmetic / DRY / slog audit 等）。
+- **已完成**：仓库重置到 `dev` 分支（orphan，仅设计资产）；宪法定局双语言内核架构（Rust 内核 + Go 非内核，双运行模式）；路线图 L0-L6 + M0-M4；001 资产评估（数据面可借鉴）；M0+M1 实现完成（36 tasks，12/12 SC PASS）。
 - **归档**：001-gateway-foundation（路由优先单管理员代理）在 `redesign` 分支，仅作历史参考。
