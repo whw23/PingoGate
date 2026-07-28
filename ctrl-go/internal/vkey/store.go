@@ -85,6 +85,19 @@ func (s *Store) Issue(ctx context.Context, ownerID string, scope Scope) (string,
 
 // Revoke disables a virtual key by setting enabled=0. Returns ErrNotFound
 // when the ID does not exist.
+// GetByID returns a single virtual key by its ID. Returns ErrNotFound if the
+// key does not exist.
+func (s *Store) GetByID(ctx context.Context, id string) (*VirtualKey, error) {
+	keys, err := s.selectKeys(ctx, "WHERE id = ? LIMIT 1", id)
+	if err != nil {
+		return nil, fmt.Errorf("vkey: get by id %q: %w", id, err)
+	}
+	if len(keys) == 0 {
+		return nil, ErrNotFound
+	}
+	return &keys[0], nil
+}
+
 func (s *Store) Revoke(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx,
 		"UPDATE virtual_keys SET enabled = 0 WHERE id = ? AND enabled = 1", id)

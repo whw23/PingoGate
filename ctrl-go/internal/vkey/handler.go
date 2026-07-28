@@ -109,6 +109,18 @@ func revokeHandler(store *Store, pusher SnapshotPusher) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "bad_request", "id is required")
 			return
 		}
+		// Ownership check (review Important #3): only the owner can revoke.
+		// Returns 404 (not 403) to avoid leaking key existence, consistent
+		// with keymgmt's pattern.
+		vk, err := store.GetByID(r.Context(), id)
+		if err != nil {
+			mapStoreError(w, err)
+			return
+		}
+		if vk.OwnerUserID != user.ID {
+			writeError(w, http.StatusNotFound, "not_found", "virtual key not found")
+			return
+		}
 		if err := store.Revoke(r.Context(), id); err != nil {
 			mapStoreError(w, err)
 			return

@@ -198,7 +198,17 @@ func main() {
 
 	httpAddr := httpAddrFromEnv()
 	log.Printf("control-plane HTTP listening on %s", httpAddr)
-	if err := http.ListenAndServe(httpAddr, r); err != nil {
+	// Constitution XXI: async, non-blocking. Timeouts prevent slow-client
+	// exhaustion (review Important #2). Pusher mutex is bounded by HTTP context.
+	srv := &http.Server{
+		Addr:              httpAddr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("HTTP server: %v", err)
 	}
 }
