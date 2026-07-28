@@ -1,7 +1,7 @@
 //! Shared harness for the S3 Task 32 end-to-end closure tests
 //! (`e2e_m0m1_closure.rs`). Spawns both binaries (Rust platform mode + Go
-//! control plane) on isolated ephemeral ports, drives the Go HTTP API, and
-//! cleans up on drop.
+//! control plane) on isolated ephemeral ports, drives the Go HTTP API, sends
+//! requests to the Rust public data-plane listener, and cleans up on drop.
 //!
 //! Constitution V (file <= 300 lines): the harness lives here so the test
 //! file itself stays under the limit. The harness is test-only (no production
@@ -39,6 +39,7 @@ pub const _GATEWAY_KEY_DOC: &str = GATEWAY_KEY;
 /// once at setup; subprocesses read them via env vars.
 pub struct ClosureEnv {
     rust_grpc_port: u16,
+    rust_public_port: u16,
     go_http_port: u16,
     go_usage_grpc_port: u16,
     certs_dir: PathBuf,
@@ -74,6 +75,7 @@ impl ClosureEnv {
         }
 
         let rust_grpc_port = free_port();
+        let rust_public_port = free_port();
         let go_http_port = free_port();
         let go_usage_grpc_port = free_port();
 
@@ -87,6 +89,7 @@ impl ClosureEnv {
 
         Self {
             rust_grpc_port,
+            rust_public_port,
             go_http_port,
             go_usage_grpc_port,
             certs_dir,
@@ -99,14 +102,25 @@ impl ClosureEnv {
     pub fn http_addr(&self) -> String {
         format!("127.0.0.1:{}", self.go_http_port)
     }
+
+    /// Rust public data-plane port.
+    pub fn public_port(&self) -> u16 {
+        self.rust_public_port
+    }
+
+    /// Path to the Go-controlled SQLite DB (for direct usage queries).
+    pub fn db_path(&self) -> &Path {
+        &self.db_path
+    }
 }
 
-/// Spawn the Rust kernel in platform mode (gRPC server only; no data plane
-/// yet - see test docstring). Returns the child handle; killed on drop.
+/// Spawn the Rust kernel in platform mode (gRPC server + Pingora data plane).
+/// Returns the child handle; killed on drop.
 pub fn spawn_rust_platform(env: &ClosureEnv) -> RustChild {
     let bin = std::env::var("CARGO_BIN_EXE_pingogate-core")
         .expect("CARGO_BIN_EXE_pingogate-core must be set by Cargo for integration tests");
     let grpc_addr = format!("127.0.0.1:{}", env.rust_grpc_port);
+    let public_addr = format!("127.0.0.1:{}", env.rust_public_port);
 
     let mut cmd = Command::new(&bin);
     cmd.arg("--grpc-addr")
@@ -121,16 +135,20 @@ pub fn spawn_rust_platform(env: &ClosureEnv) -> RustChild {
             "PINGO_USAGE_GRPC_ADDR",
             format!("127.0.0.1:{}", env.go_usage_grpc_port),
         )
+        .env("PINGO_PUBLIC_ADDR", &public_addr)
+        .env("PINGO_ADMIN_ADDR", format!("127.0.0.1:{}", free_port()))
         .env("RUST_LOG", "warn")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn pingogate-core platform");
 
-    // Wait for the gRPC listener to come up.
+    // Wait for both the gRPC and public data-plane listeners to come up.
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", env.rust_grpc_port)).is_ok() {
+        if TcpStream::connect(("127.0.0.1", env.rust_grpc_port)).is_ok()
+            && TcpStream::connect(("127.0.0.1", env.rust_public_port)).is_ok()
+        {
             return RustChild { child };
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -138,8 +156,8 @@ pub fn spawn_rust_platform(env: &ClosureEnv) -> RustChild {
     let _ = child.kill();
     let _ = child.wait();
     panic!(
-        "Rust platform-mode gRPC listener did not come up on :{}",
-        env.rust_grpc_port
+        "Rust platform-mode listeners did not come up (grpc:{}, public:{})",
+        env.rust_grpc_port, env.rust_public_port
     );
 }
 
@@ -229,6 +247,27 @@ pub fn http_post_json(
         &Request::post(path, body.as_bytes())
             .header("authorization", &format!("Bearer {bearer_token}")),
     )
+}
+
+/// Send a POST with a Bearer token and a JSON body to the **Rust public
+/// data-plane listener** (not the Go HTTP API). Returns the parsed response.
+pub fn http_post_to_rust(env: &ClosureEnv, path: &str, bearer_token: &str, body: &str) -> client::Resp {
+    client::send(
+        env.public_port(),
+        &Request::post(path, body.as_bytes())
+            .header("authorization", &format!("Bearer {bearer_token}")),
+    )
+}
+
+/// Query the usage table row count for `owner_user_id` directly from the
+/// SQLite DB. Uses the `sqlite3` CLI so no extra Rust crate is needed. Returns
+/// 0 if sqlite3 is unavailable or the table is empty.
+pub fn query_usage_count(db_path: &Path, owner_user_id: &str) -> i64 {
+    let sql = format!("SELECT COUNT(*) FROM usage WHERE owner_user_id = '{}';", owner_user_id);
+    match Command::new("sqlite3").arg(db_path).arg(&sql).output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().parse().unwrap_or(0),
+        Err(_) => 0,
+    }
 }
 
 /// Workspace root (repo root): two levels up from `core-rs/pingogate-core/`.
