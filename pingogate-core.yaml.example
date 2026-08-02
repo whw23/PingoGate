@@ -1,26 +1,83 @@
 # pingogate-core.yaml.example
-# Standalone-mode example config for the pingogate-core binary.
+# PingoGate 内核单机模式配置示例。
 #
-# Copy to pingogate-core.yaml and set the referenced env vars before starting:
-#   export PINGO_KEY_ALPHA="your-gateway-key"
-#   export OPENAI_API_KEY="sk-..."
-#   export PINGO_ADMIN_TOKEN="your-admin-token"   # R1: required for authed admin endpoints
+# 使用方法：
+#   1. 复制为 pingogate-core.yaml
+#   2. 设置 .env 中的环境变量
+#   3. 启动：./pingogate-core（或 cargo run -p pingogate-core）
+#   4. 客户端改 base_url 指向网关，token 用网关 key，model 用别名
+#
+# 热重载：
+#   修改本文件后，SIGHUP / 文件监视 / POST /reload 任一触发原子切换
+#   进行中请求继续用旧快照，零中断（宪法 XII）
+#
+# 平台模式不用此文件（Go 控制面经 gRPC 推送配置）。
 
 listeners:
   public: { address: "0.0.0.0:8080" }
   admin:  { address: "127.0.0.1:9090" }
 
+# ---- 网关 Key（客户端 -> PingoGate 鉴权）----
+# 每个是独立 principal，可按 name 归因日志/指标
+# 客户端用 Authorization: Bearer <key> 或 x-api-key: <key> 鉴权
 gateway_keys:
   - { name: "team-alpha", secret_ref: "env:PINGO_KEY_ALPHA", enabled: true }
+  - { name: "team-beta",  secret_ref: "env:PINGO_KEY_BETA",  enabled: true }
 
+# ---- 上游 Provider（可配多个，不同平台/不同协议）----
+# kind: openai-compatible | anthropic | gemini
+# auth.method: bearer | api_key_header | query_key
+# key_ref: env:VAR_NAME（密钥引用，不内联明文，宪法 XX）
 providers:
-  - name: "openai-main"
+  # OpenAI 官方
+  - name: "openai-official"
     kind: "openai-compatible"
     base_url: "https://api.openai.com"
     auth: { method: "bearer", key_ref: "env:OPENAI_API_KEY" }
     capability_families: ["generation.stateless"]
 
-routes:
-  - { alias: "gpt-4o", provider: "openai-main", upstream_model: "gpt-4o" }
+  # Anthropic 官方
+  - name: "anthropic-official"
+    kind: "anthropic"
+    base_url: "https://api.anthropic.com"
+    anthropic_version: "2023-06-01"
+    auth: { method: "api_key_header", key_ref: "env:ANTHROPIC_API_KEY" }
+    capability_families: ["generation.stateless"]
 
+  # Google Gemini 官方
+  - name: "gemini-official"
+    kind: "gemini"
+    base_url: "https://generativelanguage.googleapis.com"
+    auth: { method: "query_key", key_ref: "env:GEMINI_API_KEY" }
+    capability_families: ["generation.stateless"]
+
+  # 第二个 OpenAI-compatible 平台（自建代理 / Azure OpenAI / 第三方）
+  - name: "my-proxy"
+    kind: "openai-compatible"
+    base_url: "https://my-proxy.example.com"
+    auth: { method: "bearer", key_ref: "env:MY_PROXY_API_KEY" }
+    capability_families: ["generation.stateless"]
+
+# ---- 路由（模型别名 -> provider + 上游模型名）----
+# 客户端传 model: "<alias>"，网关路由到对应 provider，注入该 provider 的 key
+# 同一接口（如 /v1/chat/completions）的不同平台，靠 alias 区分路由
+# 同一 provider 可有多个 alias（如 gpt-4o / gpt-4o-mini 指向同一 provider）
+routes:
+  # OpenAI 官方模型
+  - { alias: "gpt-4o",       provider: "openai-official", upstream_model: "gpt-4o" }
+  - { alias: "gpt-4o-mini",  provider: "openai-official", upstream_model: "gpt-4o-mini" }
+  - { alias: "o3-pro",       provider: "openai-official", upstream_model: "o3-pro" }
+
+  # Anthropic 模型
+  - { alias: "claude-sonnet", provider: "anthropic-official", upstream_model: "claude-3-5-sonnet-latest" }
+  - { alias: "claude-haiku",  provider: "anthropic-official", upstream_model: "claude-3-5-haiku-latest" }
+
+  # Gemini 模型
+  - { alias: "gemini-pro",   provider: "gemini-official", upstream_model: "gemini-1.5-pro" }
+  - { alias: "gemini-flash", provider: "gemini-official", upstream_model: "gemini-1.5-flash" }
+
+  # 自建平台模型
+  - { alias: "custom-gpt",   provider: "my-proxy", upstream_model: "my-custom-model" }
+
+# ---- 上游超时 ----
 upstream: { timeout_ms: 60000 }
