@@ -41,6 +41,9 @@ pub struct ResolvedProvider {
     pub encrypted_key: Option<Vec<u8>>,
     pub anthropic_version: Option<String>,
     pub capability_families: Vec<CapabilityFamily>,
+    /// Per-provider timeout override (issue 3). `None` = use global
+    /// `upstream.timeout_ms`.
+    pub timeout_ms: Option<u64>,
 }
 
 /// A model-alias route resolved to a provider + upstream model.
@@ -49,6 +52,11 @@ pub struct Route {
     pub alias: String,
     pub provider: String,
     pub upstream_model: String,
+    /// Upstream path template with `{model}` placeholder (issue 2). `None` =
+    /// forward the original inbound path (existing behavior).
+    pub upstream_path: Option<String>,
+    /// Auth method override (issue 1). `None` = use provider's default.
+    pub auth_method: Option<AuthMethod>,
 }
 
 /// An enabled gateway key with its secret resolved (in-memory only; never logged).
@@ -135,6 +143,8 @@ impl RuntimeSnapshot {
                 alias: r.alias.clone(),
                 provider: r.provider.clone(),
                 upstream_model: r.upstream_model.clone(),
+                upstream_path: r.upstream_path.clone(),
+                auth_method: r.auth_method.map(map_auth),
             })
             .collect();
         let gateway_keys = resolve_gateway_keys(config, resolver)?;
@@ -202,6 +212,7 @@ fn resolve_providers(
             encrypted_key: None,
             anthropic_version: p.anthropic_version.clone(),
             capability_families: p.capability_families.clone(),
+            timeout_ms: p.timeout_ms,
         });
     }
     Ok(providers)

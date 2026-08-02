@@ -12,10 +12,16 @@ impl ResolverTrait for EnvResolver {
         let (scheme, rest) = reference
             .split_once(':')
             .ok_or_else(|| SecretError::UnsupportedScheme(reference.to_string()))?;
-        assert_eq!(scheme, "env", "test resolver only supports env:");
-        let var = rest.trim();
-        let value = std::env::var(var).map_err(|_| SecretError::MissingEnv(var.to_string()))?;
-        Ok(SecretString::new(value))
+        match scheme {
+            "env" => {
+                let var = rest.trim();
+                let value =
+                    std::env::var(var).map_err(|_| SecretError::MissingEnv(var.to_string()))?;
+                Ok(SecretString::new(value))
+            }
+            "plain" => Ok(SecretString::new(rest.trim())),
+            other => Err(SecretError::UnsupportedScheme(other.to_string())),
+        }
     }
 }
 

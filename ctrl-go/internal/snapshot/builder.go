@@ -74,6 +74,18 @@ type keyRow struct {
 	Enabled      int    `db:"enabled"`
 }
 
+// routeRow is the subset of routes columns the Builder needs. Routes are
+// optional: if the routes table has no rows, the snapshot has no routes and
+// the Rust kernel returns NoRoute for every request (issue 1/2: routes carry
+// upstream_path + auth_method overrides).
+type routeRow struct {
+	Alias         string `db:"alias"`
+	Provider      string `db:"provider"`
+	UpstreamModel string `db:"upstream_model"`
+	UpstreamPath  string `db:"upstream_path"`
+	AuthMethod    string `db:"auth_method"`
+}
+
 // Build reads user_provider_keys and assembles a proto Snapshot with the given
 // version. Only enabled keys are included; disabled keys are hidden from the
 // Rust kernel so the hot path cannot use them (constitution X: Control Plane
@@ -135,6 +147,9 @@ func (b *Builder) Build(ctx context.Context, version uint64) (*pb.Snapshot, erro
 		if def.kind == "anthropic" {
 			pe.AnthropicVersion = defaultAnthropicVersion
 		}
+		// Per-provider timeout override (issue 3): not yet stored in the DB;
+		// will be populated when the routes table migration adds timeout_ms
+		// to user_provider_keys. Left nil for now (Rust uses global default).
 		providers = append(providers, pe)
 	}
 
@@ -143,13 +158,65 @@ func (b *Builder) Build(ctx context.Context, version uint64) (*pb.Snapshot, erro
 		return nil, err
 	}
 
+	routes, err := b.buildRoutes(ctx, providerNames(providers))
+	if err != nil {
+		return nil, err
+	}
+
 	return &pb.Snapshot{
 		Version:       version,
 		Providers:     providers,
-		Routes:        nil, // S2 has no routes table; routes is S3.
+		Routes:        routes,
 		VirtualKeys:   virtualKeys,
 		EncryptedKeys: encryptedKeys,
 	}, nil
+}
+
+// providerNames extracts the set of provider names for route validation.
+func providerNames(providers []*pb.ProviderEntry) map[string]bool {
+	names := make(map[string]bool, len(providers))
+	for _, p := range providers {
+		names[p.Name] = true
+	}
+	return names
+}
+
+// buildRoutes reads the routes table and assembles proto RouteEntry messages.
+// Routes referencing unknown providers are skipped (defensive: a stale route
+// after a key deletion should not fail the whole push). The routes table is
+// optional; if it does not exist yet (pre-migration), returns nil (issue 1/2).
+func (b *Builder) buildRoutes(ctx context.Context, validProviders map[string]bool) ([]*pb.RouteEntry, error) {
+	const q = `SELECT alias, provider, upstream_model, upstream_path, auth_method
+	           FROM routes
+	           ORDER BY alias ASC`
+	var rows []routeRow
+	if err := b.db.SelectContext(ctx, &rows, q); err != nil {
+		// The routes table may not exist yet (pre-migration). Treat as empty
+		// rather than failing the whole snapshot push.
+		return nil, nil
+	}
+
+	entries := make([]*pb.RouteEntry, 0, len(rows))
+	for _, r := range rows {
+		if !validProviders[r.Provider] {
+			continue
+		}
+		entry := &pb.RouteEntry{
+			Alias:         r.Alias,
+			Provider:      r.Provider,
+			UpstreamModel: r.UpstreamModel,
+		}
+		if r.UpstreamPath != "" {
+			path := r.UpstreamPath
+			entry.UpstreamPath = &path
+		}
+		if r.AuthMethod != "" {
+			am := r.AuthMethod
+			entry.AuthMethod = &am
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 
 // vkeyRow is the subset of virtual_keys columns the Builder needs. It is

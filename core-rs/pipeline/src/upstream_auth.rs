@@ -81,21 +81,36 @@ pub fn build_upstream_auth(
     keyvault: &Option<Arc<dyn KeyVault>>,
     provider: &ResolvedProvider,
 ) -> Result<UpstreamAuth> {
+    build_upstream_auth_with_method(keyvault, provider, provider.auth_method)
+}
+
+/// Build the upstream auth plan with an explicit auth method (issue 1: per-route
+/// auth override). The key material comes from the provider (env-resolved in
+/// standalone, KeyVault-decrypted in platform); the auth *method* can be
+/// overridden per route so a single provider can serve multiple protocols with
+/// different auth styles.
+pub fn build_upstream_auth_with_method(
+    keyvault: &Option<Arc<dyn KeyVault>>,
+    provider: &ResolvedProvider,
+    method: AuthMethod,
+) -> Result<UpstreamAuth> {
     match keyvault {
         Some(kv) => {
             let encrypted = provider.encrypted_key.as_ref().ok_or_else(|| {
                 Error::explain(ErrorType::InternalError, "platform-mode provider missing encrypted_key")
             })?;
-            UpstreamAuth::build_platform(
-                provider.auth_method,
-                encrypted,
-                kv.as_ref(),
+            // Decrypt once, then build with the overridden method.
+            let plaintext: SecretString = kv
+                .decrypt(encrypted)
+                .map_err(|e| Error::explain(ErrorType::InternalError, format!("keyvault decrypt failed: {e}")))?;
+            Ok(UpstreamAuth::build(
+                method,
+                plaintext.expose(),
                 provider.anthropic_version.as_deref(),
-            )
-            .map_err(|e| Error::explain(ErrorType::InternalError, format!("keyvault decrypt failed: {e}")))
+            ))
         }
         None => Ok(UpstreamAuth::build(
-            provider.auth_method,
+            method,
             provider.key.expose(),
             provider.anthropic_version.as_deref(),
         )),

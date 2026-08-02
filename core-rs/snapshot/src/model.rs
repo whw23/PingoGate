@@ -73,6 +73,12 @@ pub struct ProviderCfg {
     pub anthropic_version: Option<String>,
     pub auth: AuthCfg,
     pub capability_families: Vec<CapabilityFamily>,
+    /// Per-provider upstream timeout in milliseconds (issue 3: timeout should
+    /// follow the provider, not be global). Overrides `upstream.timeout_ms`
+    /// when set. Different providers have different latency profiles (e.g.
+    /// Anthropic may need longer than OpenAI).
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,6 +103,20 @@ pub struct RouteCfg {
     pub alias: String,
     pub provider: String,
     pub upstream_model: String,
+    /// Upstream path template (issue 2: paths are not hardcoded). Supports
+    /// `{model}` placeholder substituted with `upstream_model` at request time.
+    /// When set, the forwarded path is rewritten to this template (prepended
+    /// with the provider base_path) instead of the original inbound path.
+    /// Example: "/v1/chat/completions" or "/api/v2/models/{model}/generate".
+    #[serde(default)]
+    pub upstream_path: Option<String>,
+    /// Auth method override (issue 1: one provider, multiple protocols). When
+    /// set, uses this auth method instead of the provider's default. Allows a
+    /// single upstream to serve different protocols with different auth styles
+    /// (e.g. OpenAI-compatible Bearer for Chat, Anthropic api_key_header for
+    /// Messages).
+    #[serde(default)]
+    pub auth_method: Option<AuthMethodKind>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

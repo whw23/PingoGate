@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use pingogate_core_types::{AppError, Principal, ProtocolKind, RequestContext, TraceId};
+use pingogate_core_types::{AppError, AuthMethod, Principal, ProtocolKind, RequestContext, TraceId};
 use pingogate_provider::TokenUsage;
 use pingogate_snapshot::RuntimeSnapshot;
 
@@ -52,6 +52,13 @@ pub struct GatewayCtx {
     pub(crate) route_model: Option<String>,
     /// Resolved upstream connection target.
     pub(crate) upstream: Option<UpstreamTarget>,
+    /// Effective upstream timeout (per-provider override or global; issue 3).
+    pub(crate) upstream_timeout_ms: u64,
+    /// Upstream path template expanded with the model name (issue 2). `None` =
+    /// forward the original inbound path.
+    pub(crate) upstream_path_rewrite: Option<String>,
+    /// Per-route auth method override (issue 1). `None` = use provider default.
+    pub(crate) route_auth_override: Option<AuthMethod>,
     /// Whether this exchange is a stream (observability marker).
     pub(crate) streaming: bool,
     /// Monotonic request start, for end-to-end latency.
@@ -92,6 +99,9 @@ impl GatewayCtx {
             route_provider: None,
             route_model: None,
             upstream: None,
+            upstream_timeout_ms: 60_000,
+            upstream_path_rewrite: None,
+            route_auth_override: None,
             streaming: false,
             started: Instant::now(),
             upstream_started: None,

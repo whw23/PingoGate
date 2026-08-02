@@ -35,6 +35,16 @@ impl SecretResolver for EnvSecretResolver {
                 }
                 Ok(SecretString::new(value))
             }
+            // Inline plaintext (issue 4: allow non-env key configuration).
+            // Convenient for standalone mode / local dev; NOT recommended for
+            // production (use env: to keep secrets out of the config file).
+            "plain" => {
+                let value = rest.trim();
+                if value.is_empty() {
+                    return Err(SecretError::EmptyValue("plain".to_string()));
+                }
+                Ok(SecretString::new(value))
+            }
             other => Err(SecretError::UnsupportedScheme(other.to_string())),
         }
     }
@@ -79,5 +89,21 @@ mod tests {
     fn empty_reference_is_rejected() {
         let r = EnvSecretResolver;
         assert!(matches!(r.resolve("   ").unwrap_err(), SecretError::Empty));
+    }
+
+    #[test]
+    fn resolves_plain_inline_value() {
+        let r = EnvSecretResolver;
+        let s = r.resolve("plain:sk-inlined-value").unwrap();
+        assert_eq!(s.expose(), "sk-inlined-value");
+    }
+
+    #[test]
+    fn plain_empty_is_rejected() {
+        let r = EnvSecretResolver;
+        assert!(matches!(
+            r.resolve("plain:").unwrap_err(),
+            SecretError::EmptyValue(_)
+        ));
     }
 }

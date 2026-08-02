@@ -10,7 +10,6 @@ use std::collections::HashSet;
 use pingogate_core_types::{ProviderKind, SecretError};
 
 use crate::model::{AuthMethodKind, GatewayConfig};
-
 /// A single semantic problem, located by a dotted config path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationError {
@@ -85,12 +84,31 @@ pub fn validate_semantics(cfg: &GatewayConfig) -> Result<(), ConfigError> {
     }
 
     let provider_names: HashSet<&str> = cfg.providers.iter().map(|p| p.name.as_str()).collect();
+    let provider_kinds: std::collections::HashMap<&str, ProviderKind> = cfg
+        .providers
+        .iter()
+        .map(|p| (p.name.as_str(), p.kind))
+        .collect();
     for (i, r) in cfg.routes.iter().enumerate() {
         if !provider_names.contains(r.provider.as_str()) {
             errs.push(ValidationError::new(
                 format!("routes[{i}].provider"),
                 format!("unknown provider: {}", r.provider),
             ));
+        }
+        // Validate auth_method override compatibility (issue 1).
+        if let Some(method) = r.auth_method {
+            if let Some(&kind) = provider_kinds.get(r.provider.as_str()) {
+                if !auth_compatible(kind, method) {
+                    errs.push(ValidationError::new(
+                        format!("routes[{i}].auth_method"),
+                        format!(
+                            "auth method {method:?} is not compatible with provider {} kind {kind}",
+                            r.provider
+                        ),
+                    ));
+                }
+            }
         }
     }
 

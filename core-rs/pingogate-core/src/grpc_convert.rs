@@ -120,6 +120,7 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             encrypted_key: Some(ciphertext.to_vec()),
             anthropic_version,
             capability_families,
+            timeout_ms: p.timeout_ms,
         });
     }
 
@@ -136,6 +137,11 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             alias: r.alias.clone(),
             provider: r.provider.clone(),
             upstream_model: r.upstream_model.clone(),
+            upstream_path: r.upstream_path.clone(),
+            auth_method: r
+                .auth_method
+                .as_deref()
+                .and_then(|s| parse_auth_method(s).ok()),
         });
     }
 

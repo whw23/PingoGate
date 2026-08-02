@@ -13,6 +13,7 @@ fn make_provider_entry(name: &str, kind: &str, auth: &str, key_ref: &str) -> Pro
         encrypted_key_ref: key_ref.to_string(),
         anthropic_version: String::new(),
         capability_families: vec!["generation.stateless".to_string()],
+        timeout_ms: None,
     }
 }
 
@@ -26,6 +27,8 @@ fn build_runtime_snapshot_resolves_encrypted_key_ref() {
             alias: "gpt-4o".to_string(),
             provider: "openai-main".to_string(),
             upstream_model: "gpt-4o".to_string(),
+            upstream_path: None,
+            auth_method: None,
         }],
         virtual_keys: vec![],
         encrypted_keys: vec![EncryptedProviderKey {
@@ -198,6 +201,8 @@ fn build_runtime_snapshot_rejects_route_to_unknown_provider() {
             alias: "a".to_string(),
             provider: "nonexistent".to_string(),
             upstream_model: "m".to_string(),
+            upstream_path: None,
+            auth_method: None,
         }],
         virtual_keys: vec![],
         encrypted_keys: vec![EncryptedProviderKey {

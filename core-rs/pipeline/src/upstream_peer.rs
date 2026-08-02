@@ -6,7 +6,7 @@
 //! testable without a live Pingora session.
 
 use http::Uri;
-use pingogate_core_types::{AppError, CapabilityFamily};
+use pingogate_core_types::{AppError, AuthMethod, CapabilityFamily};
 use pingogate_snapshot::RuntimeSnapshot;
 
 /// A provider base URL resolved to a connectable peer.
@@ -53,15 +53,33 @@ pub fn parse_base_url(base_url: &str) -> Result<UpstreamTarget, AppError> {
     })
 }
 
+/// Full routing resolution with timeout and path/auth overrides (issue 1/2/3).
+#[derive(Debug)]
+pub struct RouteResolution {
+    pub provider: String,
+    pub upstream_model: String,
+    pub target: UpstreamTarget,
+    /// Effective timeout: per-provider override or global default (issue 3).
+    pub timeout_ms: u64,
+    /// Upstream path template with `{model}` placeholder, if configured (issue 2).
+    pub upstream_path: Option<String>,
+    /// Per-route auth method override, if configured (issue 1).
+    pub auth_override: Option<AuthMethod>,
+}
+
 /// Resolve a model alias to its provider name, upstream model name, and
 /// connectable target, enforcing the provider's declared capability gate
 /// (FR-006/FR-007). The returned `upstream_model` is the provider's actual
-/// model name (not the alias) and is surfaced to the Go usage estimator so
-/// it can pick the correct tokenizer encoding.
+/// model name (not the alias) and is surfaced to the Go usage estimator so it
+/// can pick the correct tokenizer encoding.
+///
+/// Returns the effective timeout (per-provider override or global) and the
+/// route's upstream_path template + auth_override alongside the standard
+/// routing info (issue 1/2/3).
 pub fn resolve_route(
     snapshot: &RuntimeSnapshot,
     alias: &str,
-) -> Result<(String, String, UpstreamTarget), AppError> {
+) -> Result<RouteResolution, AppError> {
     let route = snapshot.route(alias).ok_or_else(|| AppError::NoRoute {
         alias: alias.to_string(),
     })?;
@@ -83,7 +101,24 @@ pub fn resolve_route(
         });
     }
     let target = parse_base_url(&provider.base_url)?;
-    Ok((route.provider.clone(), route.upstream_model.clone(), target))
+    let timeout_ms = provider
+        .timeout_ms
+        .unwrap_or(snapshot.upstream.timeout_ms);
+    Ok(RouteResolution {
+        provider: route.provider.clone(),
+        upstream_model: route.upstream_model.clone(),
+        target,
+        timeout_ms,
+        upstream_path: route.upstream_path.clone(),
+        auth_override: route.auth_method,
+    })
+}
+
+/// Expand an upstream_path template by substituting `{model}` with the resolved
+/// upstream model name (issue 2). Returns the expanded path. If the template is
+/// `None`, returns `None` (caller keeps the original inbound path).
+pub fn expand_upstream_path(template: &str, upstream_model: &str) -> String {
+    template.replace("{model}", upstream_model)
 }
 
 #[cfg(test)]
@@ -111,5 +146,17 @@ mod tests {
     fn rejects_non_http_scheme() {
         assert!(parse_base_url("ftp://example.com").is_err());
         assert!(parse_base_url("not a url").is_err());
+    }
+
+    #[test]
+    fn expand_upstream_path_substitutes_model() {
+        assert_eq!(
+            expand_upstream_path("/v1/chat/completions", "gpt-4o"),
+            "/v1/chat/completions"
+        );
+        assert_eq!(
+            expand_upstream_path("/api/v2/models/{model}/generate", "my-custom-model"),
+            "/api/v2/models/my-custom-model/generate"
+        );
     }
 }

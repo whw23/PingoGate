@@ -102,7 +102,13 @@ impl ProxyHttp for GatewayProxy {
         let target = ctx.upstream.clone().ok_or_else(|| {
             Error::explain(ErrorType::InternalError, "no upstream resolved for request")
         })?;
-        let peer = HttpPeer::new(target.addr.as_str(), target.tls, target.sni);
+        let mut peer = HttpPeer::new(target.addr.as_str(), target.tls, target.sni);
+        // Apply per-provider timeout (issue 3: timeout follows the provider).
+        // Pingora's PeerOptions exposes connect/read/write/idle timeouts.
+        let timeout = Duration::from_millis(ctx.upstream_timeout_ms);
+        peer.options.connection_timeout = Some(timeout);
+        peer.options.read_timeout = Some(timeout);
+        peer.options.write_timeout = Some(timeout);
         Ok(Box::new(peer))
     }
 
@@ -125,9 +131,24 @@ impl ProxyHttp for GatewayProxy {
             .uri.path_and_query()
             .map(|pq| pq.as_str().to_string())
             .unwrap_or_else(|| "/".to_string());
-        let mut path = format!("{}{}", base_path.unwrap_or_default(), original);
+        // Path construction (issue 2: configurable upstream path). When the
+        // route has an upstream_path rewrite, use it instead of the original
+        // inbound path. Both are prepended with the provider's base_path.
+        let path_body = ctx
+            .upstream_path_rewrite
+            .as_deref()
+            .unwrap_or(&original);
+        let mut path = format!("{}{}", base_path.unwrap_or_default(), path_body);
 
-        let auth = crate::upstream_auth::build_upstream_auth(&self.keyvault, provider)?;
+        // Auth injection (issue 1: per-route auth override). When the route
+        // specifies an auth_method override, use it instead of the provider's
+        // default. The key is still the provider's key.
+        let effective_auth_method = ctx.route_auth_override.unwrap_or(provider.auth_method);
+        let auth = crate::upstream_auth::build_upstream_auth_with_method(
+            &self.keyvault,
+            provider,
+            effective_auth_method,
+        )?;
         wire::apply_upstream_auth(upstream_request, auth, &mut path)?;
         if let Some(host) = host {
             upstream_request.insert_header("host", host.as_str())?;
