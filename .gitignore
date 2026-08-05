@@ -17,6 +17,10 @@ Cargo.lock.orig
 .env.*
 !.env.example
 
+# Local standalone config (real keys live here, never commit). The example is
+# committed as pingogate-core.example.yaml.
+pingogate-core.yaml
+
 # Editor / OS
 .idea/
 *.swp
