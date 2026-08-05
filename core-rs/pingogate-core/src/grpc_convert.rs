@@ -125,6 +125,10 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             capability_families,
             timeout_ms: p.timeout_ms,
             upstream_path: p.upstream_path.clone(),
+            // Platform mode: proxy routing is not yet part of the gRPC
+            // snapshot contract; standalone YAML config carries it.
+            http_proxy: None,
+            https_proxy: None,
         });
     }
 
@@ -157,6 +161,10 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
                 .or(defaults.anthropic_version.clone()),
             timeout_ms: r.timeout_ms.or(defaults.timeout_ms),
             upstream_path: r.upstream_path.clone().or(defaults.upstream_path.clone()),
+            // Platform mode: per-route proxy overrides are not yet part of the
+            // gRPC snapshot contract.
+            http_proxy: None,
+            https_proxy: None,
         });
     }
 
@@ -187,7 +195,11 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
         virtual_keys,
         key_owners,
         encrypted_keys,
-        upstream: UpstreamConfig { timeout_ms: 60_000 },
+        upstream: UpstreamConfig {
+            timeout_ms: 60_000,
+            http_proxy: None,
+            https_proxy: None,
+        },
     }))
 }
 

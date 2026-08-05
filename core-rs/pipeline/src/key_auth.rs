@@ -77,7 +77,11 @@ mod tests {
             virtual_keys: Vec::new(),
             key_owners: HashMap::new(),
             encrypted_keys: HashMap::new(),
-            upstream: UpstreamConfig { timeout_ms: 30000 },
+            upstream: UpstreamConfig {
+                timeout_ms: 30000,
+                http_proxy: None,
+                https_proxy: None,
+            },
         }
     }
 

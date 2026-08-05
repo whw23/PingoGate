@@ -87,6 +87,15 @@ pub struct ProviderCfg {
     /// by model.upstream_path.
     #[serde(default)]
     pub upstream_path: Option<String>,
+    /// Provider-level HTTP-traffic proxy override (`host:port` or
+    /// `http://host:port`). `None` = inherit the global `upstream.http_proxy`.
+    /// Overridden by model.http_proxy.
+    #[serde(default)]
+    pub http_proxy: Option<String>,
+    /// Provider-level HTTPS-traffic proxy override. `None` = inherit the global
+    /// `upstream.https_proxy`. Overridden by model.https_proxy.
+    #[serde(default)]
+    pub https_proxy: Option<String>,
     /// Models under this provider. Each model inherits provider defaults and
     /// can override any of them.
     #[serde(default)]
@@ -118,6 +127,12 @@ pub struct ModelCfg {
     /// Override the provider's upstream_path template for this model.
     #[serde(default)]
     pub upstream_path: Option<String>,
+    /// Per-model HTTP-traffic proxy override. `None` = inherit provider/global.
+    #[serde(default)]
+    pub http_proxy: Option<String>,
+    /// Per-model HTTPS-traffic proxy override. `None` = inherit provider/global.
+    #[serde(default)]
+    pub https_proxy: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -155,12 +170,21 @@ pub struct Metrics {
 pub struct Upstream {
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
+    /// Global default proxy for HTTP (non-TLS) upstream traffic. Format:
+    /// `host:port` or `http://host:port`. `None` = no proxy.
+    #[serde(default)]
+    pub http_proxy: Option<String>,
+    /// Global default proxy for HTTPS upstream traffic. `None` = no proxy.
+    #[serde(default)]
+    pub https_proxy: Option<String>,
 }
 
 impl Default for Upstream {
     fn default() -> Self {
         Self {
             timeout_ms: default_timeout_ms(),
+            http_proxy: None,
+            https_proxy: None,
         }
     }
 }

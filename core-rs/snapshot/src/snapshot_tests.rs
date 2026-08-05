@@ -194,3 +194,80 @@ fn example_config_parses_with_current_schema() {
         "example should define at least one model nested under a provider"
     );
 }
+
+/// Proxy fields resolve through the model > provider > global override chain:
+/// a model-level value beats provider-level, which beats the global default.
+#[test]
+fn proxy_override_chain_model_wins_over_provider_wins_over_global() {
+    std::env::set_var("PINGO_TEST_PROXY_KEY", "sk-test");
+    let yaml = r#"
+listeners:
+  public: { address: "0.0.0.0:8080" }
+  admin: { address: "127.0.0.1:9090" }
+gateway_keys:
+  - { name: "k", secret_ref: "plain:pg" }
+upstream:
+  timeout_ms: 30000
+  http_proxy: "http://global-http:3128"
+  https_proxy: "http://global-https:3128"
+providers:
+  - name: "p"
+    kind: "openai-compatible"
+    base_url: "https://upstream.example"
+    auth: { method: "bearer", key_ref: "plain:sk-test" }
+    capability_families: ["generation.stateless"]
+    http_proxy: "http://provider-http:3128"
+    https_proxy: "http://provider-https:3128"
+    models:
+      # inherits provider-level https_proxy
+      - alias: "inherits"
+        upstream_model: "inherits"
+      # overrides both levels
+      - alias: "overrides"
+        upstream_model: "overrides"
+        http_proxy: "http://model-http:8080"
+        https_proxy: "http://model-https:8080"
+"#;
+    let cfg = GatewayConfig::from_yaml(yaml).unwrap();
+    let snap = RuntimeSnapshot::build(&cfg, &EnvResolver, 1).unwrap();
+
+    let inherited = snap.route("inherits").unwrap();
+    assert_eq!(inherited.http_proxy.as_deref(), Some("http://provider-http:3128"));
+    assert_eq!(inherited.https_proxy.as_deref(), Some("http://provider-https:3128"));
+
+    let overridden = snap.route("overrides").unwrap();
+    assert_eq!(overridden.http_proxy.as_deref(), Some("http://model-http:8080"));
+    assert_eq!(overridden.https_proxy.as_deref(), Some("http://model-https:8080"));
+}
+
+/// A model with no proxy config inherits the global `upstream` default when
+/// neither the model nor its provider set one.
+#[test]
+fn proxy_inherits_global_when_no_provider_or_model_value() {
+    std::env::set_var("PINGO_TEST_PROXY_KEY2", "sk-test");
+    let yaml = r#"
+listeners:
+  public: { address: "0.0.0.0:8080" }
+  admin: { address: "127.0.0.1:9090" }
+gateway_keys:
+  - { name: "k", secret_ref: "plain:pg" }
+upstream:
+  https_proxy: "http://global-https:3128"
+providers:
+  - name: "p"
+    kind: "openai-compatible"
+    base_url: "https://upstream.example"
+    auth: { method: "bearer", key_ref: "plain:sk-test" }
+    capability_families: ["generation.stateless"]
+    models:
+      - alias: "m"
+        upstream_model: "m"
+"#;
+    let cfg = GatewayConfig::from_yaml(yaml).unwrap();
+    let snap = RuntimeSnapshot::build(&cfg, &EnvResolver, 1).unwrap();
+
+    let route = snap.route("m").unwrap();
+    assert_eq!(route.https_proxy.as_deref(), Some("http://global-https:3128"));
+    // No global http_proxy set -> resolves to None (no proxy for HTTP traffic).
+    assert_eq!(route.http_proxy, None);
+}

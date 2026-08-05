@@ -52,6 +52,9 @@ pub struct GatewayCtx {
     pub(crate) route_model: Option<String>,
     /// Resolved upstream connection target.
     pub(crate) upstream: Option<UpstreamTarget>,
+    /// Effective HTTP CONNECT proxy for this route, when configured. `None` =
+    /// connect to the upstream directly.
+    pub(crate) upstream_proxy: Option<crate::upstream_peer::ProxyTarget>,
     /// Effective upstream timeout (per-provider override or global; issue 3).
     pub(crate) upstream_timeout_ms: u64,
     /// Upstream path template expanded with the model name (issue 2). `None` =
@@ -103,6 +106,7 @@ impl GatewayCtx {
             route_provider: None,
             route_model: None,
             upstream: None,
+            upstream_proxy: None,
             upstream_timeout_ms: 60_000,
             upstream_path_rewrite: None,
             route_auth_override: None,

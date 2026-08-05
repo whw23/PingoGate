@@ -89,6 +89,10 @@ pub struct UsageExtractor {
     line_buf: LineBuffer,
     protocol: ProtocolKind,
     tokens: Option<TokenUsage>,
+    /// Whole response body accumulated for non-streaming responses. Pretty-
+    /// printed JSON spans lines, so a non-streaming body is parsed whole at
+    /// `end_of_stream` instead of line-split like SSE frames.
+    whole_body: Vec<u8>,
 }
 
 impl UsageExtractor {
@@ -97,6 +101,7 @@ impl UsageExtractor {
             line_buf: LineBuffer::new(),
             protocol,
             tokens: None,
+            whole_body: Vec::new(),
         }
     }
 
@@ -125,6 +130,22 @@ impl UsageExtractor {
     /// Drain and return the merged token usage, if any was observed.
     pub fn finalize(&mut self) -> Option<TokenUsage> {
         self.tokens.take()
+    }
+
+    /// Feed a non-streaming response body and parse it whole at `end_of_stream`.
+    /// Non-streaming JSON may be pretty-printed, so `usageMetadata` can span
+    /// multiple lines; parsing the accumulated body whole avoids line-split
+    /// breaking the object apart.
+    pub fn on_complete_body(&mut self, body: &[u8], end_of_stream: bool) {
+        self.whole_body.extend_from_slice(body);
+        if end_of_stream {
+            if !self.whole_body.is_empty() {
+                if let Some(parsed) = extract_from_line(&self.whole_body, self.protocol) {
+                    merge_tokens(&mut self.tokens, parsed);
+                }
+            }
+            self.whole_body.clear();
+        }
     }
 
     /// Current residual buffer length (for tests / health checks).

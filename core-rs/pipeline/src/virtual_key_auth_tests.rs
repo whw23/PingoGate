@@ -37,7 +37,11 @@ fn snapshot_with(vkeys: Vec<VirtualKeyEntry>) -> RuntimeSnapshot {
         virtual_keys: vkeys,
         key_owners: HashMap::new(),
         encrypted_keys: HashMap::new(),
-        upstream: UpstreamConfig { timeout_ms: 30_000 },
+        upstream: UpstreamConfig {
+            timeout_ms: 30_000,
+            http_proxy: None,
+            https_proxy: None,
+        },
     }
 }
 

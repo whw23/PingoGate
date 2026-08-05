@@ -18,7 +18,7 @@ use pingogate_core_types::{
     AuthMethod, CapabilityFamily, ProviderKind, SecretResolver, SecretString,
 };
 
-use crate::model::{AuthMethodKind, GatewayConfig, ModelCfg};
+use crate::model::{AuthMethodKind, GatewayConfig, ModelCfg, Upstream};
 use crate::validate::{validate_semantics, ConfigError};
 
 /// A provider with its secret resolved and auth method normalized.
@@ -41,6 +41,10 @@ pub struct ResolvedProvider {
     pub timeout_ms: Option<u64>,
     /// Provider-level upstream path template. `None` = forward inbound path.
     pub upstream_path: Option<String>,
+    /// Provider-level HTTP-traffic proxy. `None` = inherit global.
+    pub http_proxy: Option<String>,
+    /// Provider-level HTTPS-traffic proxy. `None` = inherit global.
+    pub https_proxy: Option<String>,
 }
 
 /// A resolved model route with effective parameter values (model override ??
@@ -62,6 +66,12 @@ pub struct Route {
     /// Effective upstream path template (model ?? provider). `None` = forward
     /// inbound path.
     pub upstream_path: Option<String>,
+    /// Effective HTTP-traffic proxy (model ?? provider ?? global). `None` = no
+    /// proxy. Used for non-TLS upstreams.
+    pub http_proxy: Option<String>,
+    /// Effective HTTPS-traffic proxy (model ?? provider ?? global). Used for
+    /// TLS upstreams.
+    pub https_proxy: Option<String>,
 }
 
 /// An enabled gateway key with its secret resolved (in-memory only; never logged).
@@ -89,6 +99,10 @@ pub struct VirtualKeyEntry {
 #[derive(Debug, Clone)]
 pub struct UpstreamConfig {
     pub timeout_ms: u64,
+    /// Global HTTP-traffic proxy (`host:port` or `http://host:port`).
+    pub http_proxy: Option<String>,
+    /// Global HTTPS-traffic proxy.
+    pub https_proxy: Option<String>,
 }
 
 /// An immutable view of runtime configuration. Cloned cheaply via `Arc`.
@@ -125,6 +139,8 @@ impl RuntimeSnapshot {
             encrypted_keys: HashMap::new(),
             upstream: UpstreamConfig {
                 timeout_ms: config.upstream.timeout_ms,
+                http_proxy: config.upstream.http_proxy.clone(),
+                https_proxy: config.upstream.https_proxy.clone(),
             },
         }))
     }
@@ -179,6 +195,8 @@ fn resolve_providers(
             capability_families: p.capability_families.clone(),
             timeout_ms: p.timeout_ms,
             upstream_path: p.upstream_path.clone(),
+            http_proxy: p.http_proxy.clone(),
+            https_proxy: p.https_proxy.clone(),
         });
     }
     Ok(providers)
@@ -196,15 +214,16 @@ fn resolve_routes(providers: &[ResolvedProvider], config: &GatewayConfig) -> Vec
             None => continue, // validate_semantics should have caught this
         };
         for m in &p.models {
-            let route = resolve_one_route(m, resolved);
+            let route = resolve_one_route(m, resolved, &config.upstream);
             routes.push(route);
         }
     }
     routes
 }
 
-/// Resolve a single model route, applying the override chain.
-fn resolve_one_route(m: &ModelCfg, provider: &ResolvedProvider) -> Route {
+/// Resolve a single model route, applying the model > provider > global
+/// override chain for each parameter.
+fn resolve_one_route(m: &ModelCfg, provider: &ResolvedProvider, global: &Upstream) -> Route {
     Route {
         alias: m.alias.clone(),
         provider: provider.name.clone(),
@@ -220,6 +239,16 @@ fn resolve_one_route(m: &ModelCfg, provider: &ResolvedProvider) -> Route {
             .or(provider.anthropic_version.clone()),
         timeout_ms: m.timeout_ms.or(provider.timeout_ms),
         upstream_path: m.upstream_path.clone().or(provider.upstream_path.clone()),
+        http_proxy: m
+            .http_proxy
+            .clone()
+            .or(provider.http_proxy.clone())
+            .or(global.http_proxy.clone()),
+        https_proxy: m
+            .https_proxy
+            .clone()
+            .or(provider.https_proxy.clone())
+            .or(global.https_proxy.clone()),
     }
 }
 
@@ -267,7 +296,11 @@ impl SnapshotHolder {
                 virtual_keys: Vec::new(),
                 key_owners: HashMap::new(),
                 encrypted_keys: HashMap::new(),
-                upstream: UpstreamConfig { timeout_ms: 60_000 },
+                upstream: UpstreamConfig {
+                    timeout_ms: 60_000,
+                    http_proxy: None,
+                    https_proxy: None,
+                },
             })),
         }
     }

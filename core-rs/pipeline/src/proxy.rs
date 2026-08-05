@@ -23,6 +23,7 @@ use crate::observe;
 use crate::prepare::prepare;
 use crate::streaming;
 use crate::upstream_auth::GATEWAY_KEY_HEADERS;
+use crate::upstream_peer::ProxyL4Connector;
 use crate::usage_event::build_usage_event;
 use crate::usage_reporter::UsageReporter;
 use crate::wire;
@@ -35,6 +36,16 @@ pub struct GatewayProxy {
     auth: Arc<dyn KeyAuth>,
     keyvault: Option<Arc<dyn KeyVault>>,
     usage: Arc<dyn UsageReporter>,
+}
+
+/// Compute a connection-pool group key for a proxied route, so peers through
+/// different proxies (or no proxy) never share a pooled upstream connection.
+fn proxy_group_key(proxy: &crate::upstream_peer::ProxyTarget) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    proxy.host.hash(&mut hasher);
+    proxy.port.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl GatewayProxy {
@@ -102,13 +113,29 @@ impl ProxyHttp for GatewayProxy {
         let target = ctx.upstream.clone().ok_or_else(|| {
             Error::explain(ErrorType::InternalError, "no upstream resolved for request")
         })?;
-        let mut peer = HttpPeer::new(target.addr.as_str(), target.tls, target.sni);
+        let mut peer = HttpPeer::new(target.addr.as_str(), target.tls, target.sni.clone());
         // Apply per-provider timeout (issue 3: timeout follows the provider).
         // Pingora's PeerOptions exposes connect/read/write/idle timeouts.
         let timeout = Duration::from_millis(ctx.upstream_timeout_ms);
         peer.options.connection_timeout = Some(timeout);
         peer.options.read_timeout = Some(timeout);
         peer.options.write_timeout = Some(timeout);
+        // Route the upstream connection through an HTTP CONNECT proxy when the
+        // model/provider/global chain configured one. Pingora's built-in proxy
+        // support is Unix-socket-only, so we inject a custom L4 connector that
+        // dials the proxy and establishes the CONNECT tunnel (TLS to the
+        // upstream is done by Pingora on the returned stream). A distinct
+        // group_key keeps pooled connections per-proxy (a shared pool would let
+        // a direct and a proxied request reuse each other's connection).
+        if let Some(proxy) = ctx.upstream_proxy.as_ref() {
+            peer.group_key = proxy_group_key(proxy);
+            peer.options.custom_l4 = Some(Arc::new(ProxyL4Connector {
+                proxy: proxy.clone(),
+                connect_host: target.sni.clone(),
+                connect_port: target.port,
+                timeout,
+            }));
+        }
         Ok(Box::new(peer))
     }
 

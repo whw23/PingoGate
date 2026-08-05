@@ -8,9 +8,10 @@
 #   4. 客户端改 base_url 指向网关，token 用网关 key，model 用模型别名
 #
 # 配置层级（model > provider > global）：
-#   - global: upstream.timeout_ms（全局默认超时）
-#   - provider: kind / base_url / auth / timeout_ms / upstream_path / anthropic_version
-#   - model: 嵌套在 provider 下，可覆盖 provider 任一参数
+#   - global: upstream.timeout_ms / http_proxy / https_proxy
+#   - provider: kind / base_url / auth / timeout_ms / upstream_path /
+#               anthropic_version / http_proxy / https_proxy
+#   - model: 嵌套在 provider 下，可覆盖 provider 任一参数（含代理字段）
 #   未覆盖的参数自动继承父层级。
 #
 # 热重载：
@@ -143,8 +144,34 @@ providers:
         upstream_path: "/anthropic/v1/messages"
         anthropic_version: "2023-06-01"
 
-# ---- 上游超时（全局默认，provider/model 的 timeout_ms 覆盖此值）----
-upstream: { timeout_ms: 60000 }
+  # ============ 上游 HTTP(S) 代理（http_proxy / https_proxy 三层覆盖）============
+  # HTTPS 上游用 https_proxy，HTTP 上游用 http_proxy；格式 host:port 或 http://host:port。
+  # 覆盖链：model.http_proxy > provider.http_proxy > upstream.http_proxy（https 同理）。
+  # 每个模型可独立走不同代理；某个层级留空 = 继承父级，全链路留空 = 直连。
+  - name: "proxied-platform"
+    kind: "openai-compatible"
+    base_url: "https://proxied.example.com"
+    auth: { method: "bearer", key_ref: "env:OPENAI_API_KEY" }
+    capability_families: ["generation.stateless"]
+    https_proxy: "http://127.0.0.1:7890"       # provider 级：该 provider 所有模型默认走此代理
+    models:
+      - { alias: "proxied-a", upstream_model: "a" }   # 继承 provider 代理
+      # 模型级覆盖：这个模型换一个代理
+      - alias: "proxied-b"
+        upstream_model: "b"
+        https_proxy: "http://127.0.0.1:7891"
+      # 全局覆盖：不设 provider 级，只设全局 upstream.https_proxy 时，此模型仍可独立指定
+      - alias: "proxied-c"
+        upstream_model: "c"
+        https_proxy: "http://proxy-c.example:3128"
+
+# ---- 上游全局默认（超时 + 代理，provider/model 可覆盖）----
+# http_proxy / https_proxy: HTTP(S) CONNECT 代理，按上游 scheme 选用（https 用
+# https_proxy，http 用 http_proxy）。格式 host:port 或 http://host:port。
+# 留空 = 直连。provider / model 级可逐级覆盖，实现「每个模型独立设置代理」。
+upstream:
+  timeout_ms: 60000
+  # https_proxy: "http://127.0.0.1:7890"   # 例：全局 HTTPS 上游走本地代理
 
 # ---- Token 统计维度（自动提取，无需配置）----
 # 网关自动从上游响应提取并按维度持久化：

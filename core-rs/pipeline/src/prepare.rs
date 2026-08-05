@@ -93,6 +93,7 @@ pub(crate) fn commit_route(
     ctx.route_provider = Some(resolution.provider);
     ctx.route_model = Some(resolution.upstream_model.clone());
     ctx.upstream = Some(resolution.target);
+    ctx.upstream_proxy = resolution.upstream_proxy;
     ctx.upstream_timeout_ms = resolution.timeout_ms;
     // Expand the upstream_path template if configured (issue 2).
     ctx.upstream_path_rewrite = resolution

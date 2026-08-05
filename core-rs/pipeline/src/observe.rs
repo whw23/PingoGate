@@ -18,15 +18,30 @@ use crate::metrics::{Metrics, RequestRecord};
 /// `response_body_filter` on every chunk; safe when no extractor is
 /// initialized (unrouted/error requests).
 pub(crate) fn tap_body_chunk(ctx: &mut GatewayCtx, body: &Option<Bytes>, end_of_stream: bool) {
-    if let Some(chunk) = body.as_ref() {
-        if let Some(ex) = ctx.usage_extractor.as_mut() {
-            ex.on_body_chunk(chunk, end_of_stream);
+    let Some(ex) = ctx.usage_extractor.as_mut() else {
+        return;
+    };
+    if ctx.streaming {
+        // Streaming (SSE): each usage-bearing event fits on one line.
+        match body.as_ref() {
+            Some(chunk) => ex.on_body_chunk(chunk, end_of_stream),
+            // Pingora can signal stream end with a `None` body; flush the
+            // residual line anyway.
+            None if end_of_stream => ex.on_body_chunk(&[], true),
+            None => {}
+        }
+    } else {
+        // Non-streaming: parse the accumulated body whole. A pretty-printed
+        // JSON body has no trailing newline and `usageMetadata` spans lines,
+        // so line-splitting would break it apart.
+        match body.as_ref() {
+            Some(chunk) => ex.on_complete_body(chunk, end_of_stream),
+            None if end_of_stream => ex.on_complete_body(&[], true),
+            None => {}
         }
     }
     if end_of_stream {
-        if let Some(ex) = ctx.usage_extractor.as_mut() {
-            ctx.tokens = ex.finalize().filter(|u| !u.is_empty());
-        }
+        ctx.tokens = ex.finalize().filter(|u| !u.is_empty());
     }
 }
 
