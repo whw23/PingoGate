@@ -59,6 +59,10 @@ pub struct GatewayCtx {
     pub(crate) upstream_path_rewrite: Option<String>,
     /// Per-route auth method override (issue 1). `None` = use provider default.
     pub(crate) route_auth_override: Option<AuthMethod>,
+    /// Effective upstream kind (for future protocol conversion).
+    pub(crate) route_kind: Option<pingogate_core_types::ProviderKind>,
+    /// Effective anthropic_version (model ?? provider).
+    pub(crate) route_anthropic_version: Option<String>,
     /// Whether this exchange is a stream (observability marker).
     pub(crate) streaming: bool,
     /// Monotonic request start, for end-to-end latency.
@@ -102,6 +106,8 @@ impl GatewayCtx {
             upstream_timeout_ms: 60_000,
             upstream_path_rewrite: None,
             route_auth_override: None,
+            route_kind: None,
+            route_anthropic_version: None,
             streaming: false,
             started: Instant::now(),
             upstream_started: None,

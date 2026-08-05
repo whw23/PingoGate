@@ -59,6 +59,9 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
 
     let mut providers = Vec::with_capacity(snap.providers.len());
     let mut provider_names: HashMap<&str, ()> = HashMap::new();
+    // Store provider-level defaults for route resolution (model > provider
+    // override chain).
+    let mut provider_defaults: HashMap<String, ProviderDefaults> = HashMap::new();
     for p in &snap.providers {
         if provider_names.insert(p.name.as_str(), ()).is_some() {
             return Err(Status::invalid_argument(format!(
@@ -80,7 +83,6 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             )));
         }
 
-        // Resolve the encrypted key reference to ciphertext bytes.
         let ciphertext = key_map.get(p.encrypted_key_ref.as_str()).copied().ok_or_else(|| {
             Status::invalid_argument(format!(
                 "provider {} references unknown encrypted_key_ref: {}",
@@ -88,8 +90,6 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             ))
         })?;
 
-        // Anthropic providers require a version header (mirrors standalone
-        // validation in `validate_semantics`).
         let anthropic_version = if p.anthropic_version.is_empty() {
             if kind == ProviderKind::Anthropic {
                 return Err(Status::invalid_argument(format!(
@@ -102,14 +102,17 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             Some(p.anthropic_version.clone())
         };
 
-        // Auth method must be compatible with the provider kind (mirrors
-        // `auth_compatible` in standalone validation).
-        if !auth_compatible(kind, auth_method) {
-            return Err(Status::invalid_argument(format!(
-                "provider {}: auth method {:?} is not compatible with kind {}",
-                p.name, auth_method, kind
-            )));
-        }
+        // Save defaults for route resolution.
+        provider_defaults.insert(
+            p.name.clone(),
+            ProviderDefaults {
+                kind,
+                auth_method,
+                anthropic_version: anthropic_version.clone(),
+                timeout_ms: p.timeout_ms,
+                upstream_path: p.upstream_path.clone(),
+            },
+        );
 
         providers.push(ResolvedProvider {
             name: p.name.clone(),
@@ -121,27 +124,39 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             anthropic_version,
             capability_families,
             timeout_ms: p.timeout_ms,
+            upstream_path: p.upstream_path.clone(),
         });
     }
 
-    // Routes must reference an existing provider.
+    // Routes: resolve effective values (model override ?? provider default).
     let mut routes = Vec::with_capacity(snap.routes.len());
     for r in &snap.routes {
-        if !provider_names.contains_key(r.provider.as_str()) {
-            return Err(Status::invalid_argument(format!(
+        let defaults = provider_defaults.get(&r.provider).ok_or_else(|| {
+            Status::invalid_argument(format!(
                 "route {} references unknown provider: {}",
                 r.alias, r.provider
-            )));
-        }
+            ))
+        })?;
         routes.push(Route {
             alias: r.alias.clone(),
             provider: r.provider.clone(),
             upstream_model: r.upstream_model.clone(),
-            upstream_path: r.upstream_path.clone(),
+            kind: r
+                .kind
+                .as_deref()
+                .and_then(|s| parse_provider_kind(s).ok())
+                .unwrap_or(defaults.kind),
             auth_method: r
                 .auth_method
                 .as_deref()
-                .and_then(|s| parse_auth_method(s).ok()),
+                .and_then(|s| parse_auth_method(s).ok())
+                .unwrap_or(defaults.auth_method),
+            anthropic_version: r
+                .anthropic_version
+                .clone()
+                .or(defaults.anthropic_version.clone()),
+            timeout_ms: r.timeout_ms.or(defaults.timeout_ms),
+            upstream_path: r.upstream_path.clone().or(defaults.upstream_path.clone()),
         });
     }
 
@@ -198,11 +213,14 @@ fn parse_capability_families(families: &[String]) -> Result<Vec<CapabilityFamily
     families.iter().map(|f| CapabilityFamily::from_str(f)).collect()
 }
 
-fn auth_compatible(kind: ProviderKind, method: AuthMethod) -> bool {
-    matches!(
-        (kind, method),
-        (ProviderKind::OpenaiCompatible, AuthMethod::Bearer)
-            | (ProviderKind::Anthropic, AuthMethod::ApiKeyHeader)
-            | (ProviderKind::Gemini, AuthMethod::QueryKey)
-    )
+/// Provider-level defaults stored for route resolution (model > provider
+/// override chain). The Go builder populates RouteEntry with effective values
+/// when possible; this struct lets the Rust side resolve any field the builder
+/// left unset.
+struct ProviderDefaults {
+    kind: ProviderKind,
+    auth_method: AuthMethod,
+    anthropic_version: Option<String>,
+    timeout_ms: Option<u64>,
+    upstream_path: Option<String>,
 }

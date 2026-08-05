@@ -108,7 +108,8 @@ type ProviderEntry struct {
 	EncryptedKeyRef    string                 `protobuf:"bytes,5,opt,name=encrypted_key_ref,json=encryptedKeyRef,proto3" json:"encrypted_key_ref,omitempty"` // 引用 encrypted_keys 中的 id
 	AnthropicVersion   string                 `protobuf:"bytes,6,opt,name=anthropic_version,json=anthropicVersion,proto3" json:"anthropic_version,omitempty"`
 	CapabilityFamilies []string               `protobuf:"bytes,7,rep,name=capability_families,json=capabilityFamilies,proto3" json:"capability_families,omitempty"`
-	TimeoutMs          *uint64                `protobuf:"varint,8,opt,name=timeout_ms,json=timeoutMs,proto3,oneof" json:"timeout_ms,omitempty"` // per-provider 超时覆盖 (issue 3)
+	TimeoutMs          *uint64                `protobuf:"varint,8,opt,name=timeout_ms,json=timeoutMs,proto3,oneof" json:"timeout_ms,omitempty"`         // per-provider 超时覆盖
+	UpstreamPath       *string                `protobuf:"bytes,9,opt,name=upstream_path,json=upstreamPath,proto3,oneof" json:"upstream_path,omitempty"` // per-provider 上游路径模板
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -199,15 +200,25 @@ func (x *ProviderEntry) GetTimeoutMs() uint64 {
 	return 0
 }
 
+func (x *ProviderEntry) GetUpstreamPath() string {
+	if x != nil && x.UpstreamPath != nil {
+		return *x.UpstreamPath
+	}
+	return ""
+}
+
 type RouteEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Alias         string                 `protobuf:"bytes,1,opt,name=alias,proto3" json:"alias,omitempty"`
-	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
-	UpstreamModel string                 `protobuf:"bytes,3,opt,name=upstream_model,json=upstreamModel,proto3" json:"upstream_model,omitempty"`
-	UpstreamPath  *string                `protobuf:"bytes,4,opt,name=upstream_path,json=upstreamPath,proto3,oneof" json:"upstream_path,omitempty"` // 上游路径模板,支持 {model} 占位符 (issue 2)
-	AuthMethod    *string                `protobuf:"bytes,5,opt,name=auth_method,json=authMethod,proto3,oneof" json:"auth_method,omitempty"`       // per-route auth 覆盖 (issue 1)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Alias            string                 `protobuf:"bytes,1,opt,name=alias,proto3" json:"alias,omitempty"`
+	Provider         string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	UpstreamModel    string                 `protobuf:"bytes,3,opt,name=upstream_model,json=upstreamModel,proto3" json:"upstream_model,omitempty"`
+	UpstreamPath     *string                `protobuf:"bytes,4,opt,name=upstream_path,json=upstreamPath,proto3,oneof" json:"upstream_path,omitempty"`             // 上游路径模板,支持 {model} 占位符
+	AuthMethod       *string                `protobuf:"bytes,5,opt,name=auth_method,json=authMethod,proto3,oneof" json:"auth_method,omitempty"`                   // per-route auth 覆盖
+	Kind             *string                `protobuf:"bytes,6,opt,name=kind,proto3,oneof" json:"kind,omitempty"`                                                 // per-route kind 覆盖 (协议转换)
+	AnthropicVersion *string                `protobuf:"bytes,7,opt,name=anthropic_version,json=anthropicVersion,proto3,oneof" json:"anthropic_version,omitempty"` // per-route anthropic_version 覆盖
+	TimeoutMs        *uint64                `protobuf:"varint,8,opt,name=timeout_ms,json=timeoutMs,proto3,oneof" json:"timeout_ms,omitempty"`                     // per-route 超时覆盖
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RouteEntry) Reset() {
@@ -273,6 +284,27 @@ func (x *RouteEntry) GetAuthMethod() string {
 		return *x.AuthMethod
 	}
 	return ""
+}
+
+func (x *RouteEntry) GetKind() string {
+	if x != nil && x.Kind != nil {
+		return *x.Kind
+	}
+	return ""
+}
+
+func (x *RouteEntry) GetAnthropicVersion() string {
+	if x != nil && x.AnthropicVersion != nil {
+		return *x.AnthropicVersion
+	}
+	return ""
+}
+
+func (x *RouteEntry) GetTimeoutMs() uint64 {
+	if x != nil && x.TimeoutMs != nil {
+		return *x.TimeoutMs
+	}
+	return 0
 }
 
 type EncryptedProviderKey struct {
@@ -1130,7 +1162,7 @@ const file_pingogate_proto_rawDesc = "" +
 	"\tproviders\x18\x02 \x03(\v2\x18.pingogate.ProviderEntryR\tproviders\x12-\n" +
 	"\x06routes\x18\x03 \x03(\v2\x15.pingogate.RouteEntryR\x06routes\x12=\n" +
 	"\fvirtual_keys\x18\x04 \x03(\v2\x1a.pingogate.VirtualKeyEntryR\vvirtualKeys\x12F\n" +
-	"\x0eencrypted_keys\x18\x05 \x03(\v2\x1f.pingogate.EncryptedProviderKeyR\rencryptedKeys\"\xb0\x02\n" +
+	"\x0eencrypted_keys\x18\x05 \x03(\v2\x1f.pingogate.EncryptedProviderKeyR\rencryptedKeys\"\xec\x02\n" +
 	"\rProviderEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x19\n" +
@@ -1141,8 +1173,10 @@ const file_pingogate_proto_rawDesc = "" +
 	"\x11anthropic_version\x18\x06 \x01(\tR\x10anthropicVersion\x12/\n" +
 	"\x13capability_families\x18\a \x03(\tR\x12capabilityFamilies\x12\"\n" +
 	"\n" +
-	"timeout_ms\x18\b \x01(\x04H\x00R\ttimeoutMs\x88\x01\x01B\r\n" +
-	"\v_timeout_ms\"\xd7\x01\n" +
+	"timeout_ms\x18\b \x01(\x04H\x00R\ttimeoutMs\x88\x01\x01\x12(\n" +
+	"\rupstream_path\x18\t \x01(\tH\x01R\fupstreamPath\x88\x01\x01B\r\n" +
+	"\v_timeout_msB\x10\n" +
+	"\x0e_upstream_path\"\xf4\x02\n" +
 	"\n" +
 	"RouteEntry\x12\x14\n" +
 	"\x05alias\x18\x01 \x01(\tR\x05alias\x12\x1a\n" +
@@ -1150,9 +1184,16 @@ const file_pingogate_proto_rawDesc = "" +
 	"\x0eupstream_model\x18\x03 \x01(\tR\rupstreamModel\x12(\n" +
 	"\rupstream_path\x18\x04 \x01(\tH\x00R\fupstreamPath\x88\x01\x01\x12$\n" +
 	"\vauth_method\x18\x05 \x01(\tH\x01R\n" +
-	"authMethod\x88\x01\x01B\x10\n" +
+	"authMethod\x88\x01\x01\x12\x17\n" +
+	"\x04kind\x18\x06 \x01(\tH\x02R\x04kind\x88\x01\x01\x120\n" +
+	"\x11anthropic_version\x18\a \x01(\tH\x03R\x10anthropicVersion\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"timeout_ms\x18\b \x01(\x04H\x04R\ttimeoutMs\x88\x01\x01B\x10\n" +
 	"\x0e_upstream_pathB\x0e\n" +
-	"\f_auth_method\"\x89\x01\n" +
+	"\f_auth_methodB\a\n" +
+	"\x05_kindB\x14\n" +
+	"\x12_anthropic_versionB\r\n" +
+	"\v_timeout_ms\"\x89\x01\n" +
 	"\x14EncryptedProviderKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1e\n" +
 	"\n" +

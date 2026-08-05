@@ -100,6 +100,8 @@ pub(crate) fn commit_route(
         .as_deref()
         .map(|tmpl| expand_upstream_path(tmpl, &resolution.upstream_model));
     ctx.route_auth_override = resolution.auth_override;
+    ctx.route_kind = Some(resolution.kind);
+    ctx.route_anthropic_version = resolution.anthropic_version;
     ctx.usage_extractor = Some(UsageExtractor::new(detected.protocol));
     if ctx.streaming && detected.protocol == ProtocolKind::OpenAiCompatible {
         if let Some(b) = body.as_deref() {

@@ -81,38 +81,40 @@ pub fn build_upstream_auth(
     keyvault: &Option<Arc<dyn KeyVault>>,
     provider: &ResolvedProvider,
 ) -> Result<UpstreamAuth> {
-    build_upstream_auth_with_method(keyvault, provider, provider.auth_method)
+    build_upstream_auth_with_method(
+        keyvault,
+        provider,
+        provider.auth_method,
+        provider.anthropic_version.as_deref(),
+    )
 }
 
-/// Build the upstream auth plan with an explicit auth method (issue 1: per-route
-/// auth override). The key material comes from the provider (env-resolved in
-/// standalone, KeyVault-decrypted in platform); the auth *method* can be
+/// Build the upstream auth plan with explicit auth method + anthropic_version
+/// (issue 1: per-route auth override + model > provider hierarchy). The key
+/// material comes from the provider (env-resolved in standalone, KeyVault-
+/// decrypted in platform); the auth *method* and *anthropic_version* can be
 /// overridden per route so a single provider can serve multiple protocols with
 /// different auth styles.
 pub fn build_upstream_auth_with_method(
     keyvault: &Option<Arc<dyn KeyVault>>,
     provider: &ResolvedProvider,
     method: AuthMethod,
+    anthropic_version: Option<&str>,
 ) -> Result<UpstreamAuth> {
     match keyvault {
         Some(kv) => {
             let encrypted = provider.encrypted_key.as_ref().ok_or_else(|| {
                 Error::explain(ErrorType::InternalError, "platform-mode provider missing encrypted_key")
             })?;
-            // Decrypt once, then build with the overridden method.
             let plaintext: SecretString = kv
                 .decrypt(encrypted)
                 .map_err(|e| Error::explain(ErrorType::InternalError, format!("keyvault decrypt failed: {e}")))?;
-            Ok(UpstreamAuth::build(
-                method,
-                plaintext.expose(),
-                provider.anthropic_version.as_deref(),
-            ))
+            Ok(UpstreamAuth::build(method, plaintext.expose(), anthropic_version))
         }
         None => Ok(UpstreamAuth::build(
             method,
             provider.key.expose(),
-            provider.anthropic_version.as_deref(),
+            anthropic_version,
         )),
     }
 }

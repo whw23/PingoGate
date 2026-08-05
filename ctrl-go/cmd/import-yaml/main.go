@@ -38,22 +38,24 @@ import (
 	"github.com/whw23/pingogate/ctrl-go/internal/storage"
 )
 
-// standaloneConfig mirrors the pingogate-core.yaml schema (subset: providers +
-// routes). We intentionally do not import listeners/gateway_keys (platform mode
-// gets those from env/Go config, not YAML).
+// standaloneConfig mirrors the pingogate-core.yaml schema (subset: providers
+// with nested models). We intentionally do not import listeners/gateway_keys
+// (platform mode gets those from env/Go config, not YAML). The old flat
+// `routes:` section is gone; models are nested under each provider.
 type standaloneConfig struct {
 	Providers []providerCfg `yaml:"providers"`
-	Routes    []routeCfg    `yaml:"routes"`
 }
 
 type providerCfg struct {
-	Name              string        `yaml:"name"`
-	Kind              string        `yaml:"kind"`
-	BaseURL           string        `yaml:"base_url"`
-	AnthropicVersion  string        `yaml:"anthropic_version"`
-	Auth              authCfg       `yaml:"auth"`
-	CapabilityFamilies []string     `yaml:"capability_families"`
-	TimeoutMs         *uint64       `yaml:"timeout_ms"`
+	Name              string    `yaml:"name"`
+	Kind              string    `yaml:"kind"`
+	BaseURL           string    `yaml:"base_url"`
+	AnthropicVersion  string    `yaml:"anthropic_version"`
+	Auth              authCfg   `yaml:"auth"`
+	CapabilityFamilies []string `yaml:"capability_families"`
+	TimeoutMs         *uint64   `yaml:"timeout_ms"`
+	UpstreamPath      string    `yaml:"upstream_path"`
+	Models            []modelCfg `yaml:"models"`
 }
 
 type authCfg struct {
@@ -61,12 +63,17 @@ type authCfg struct {
 	KeyRef string `yaml:"key_ref"`
 }
 
-type routeCfg struct {
-	Alias         string `yaml:"alias"`
-	Provider      string `yaml:"provider"`
-	UpstreamModel string `yaml:"upstream_model"`
-	UpstreamPath  string `yaml:"upstream_path"`
-	AuthMethod    string `yaml:"auth_method"`
+// modelCfg mirrors a model nested under a provider (config hierarchy:
+// model > provider). All fields except alias/upstream_model are optional
+// overrides.
+type modelCfg struct {
+	Alias            string  `yaml:"alias"`
+	UpstreamModel    string  `yaml:"upstream_model"`
+	Kind             string  `yaml:"kind"`
+	AuthMethod       string  `yaml:"auth_method"`
+	AnthropicVersion string  `yaml:"anthropic_version"`
+	TimeoutMs        *uint64 `yaml:"timeout_ms"`
+	UpstreamPath     string  `yaml:"upstream_path"`
 }
 
 // providerTypeFromKind maps the YAML kind to the DB provider_type used by
@@ -176,12 +183,11 @@ func main() {
 	defer conn.Close()
 	kvClient := pb.NewKeyVaultServiceClient(conn)
 
-	// Import each provider.
+	// Import each provider and its nested models as routes.
 	imported, skipped := 0, 0
+	routeImported := 0
 	for _, p := range cfg.Providers {
 		// Check if a provider key with this name already exists (idempotent).
-		// The provider name in YAML maps to the key ID prefix; we use the
-		// provider name directly as a deterministic key ID for import.
 		keyID := "imp_" + p.Name
 		exists, err := providerKeyExists(ctx, db, keyID)
 		if err != nil {
@@ -190,61 +196,92 @@ func main() {
 		if exists {
 			log.Printf("skip: provider %q already imported (key_id=%s)", p.Name, keyID)
 			skipped++
-			continue
+		} else {
+			// Resolve the key_ref to plaintext.
+			plaintext, err := resolveKeyRef(p.Auth.KeyRef)
+			if err != nil {
+				log.Fatalf("resolve key_ref for provider %q: %v", p.Name, err)
+			}
+
+			// Encrypt via Rust KeyVault.
+			encResp, err := kvClient.Encrypt(ctx, &pb.EncryptRequest{Plaintext: []byte(plaintext)})
+			if err != nil {
+				log.Fatalf("encrypt key for provider %q: %v", p.Name, err)
+			}
+			if encResp.Error != "" {
+				log.Fatalf("encrypt key for provider %q: %s", p.Name, encResp.Error)
+			}
+
+			// Insert into DB.
+			providerType := providerTypeFromKind(p.Kind)
+			last4 := computeLast4(plaintext)
+			_, err = db.ExecContext(ctx,
+				`INSERT INTO user_provider_keys (id, owner_user_id, provider_type, encrypted_key, key_last4, base_url, created_by, created_at, enabled)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+				keyID, adminUser.ID, providerType, encResp.Ciphertext, last4, p.BaseURL, adminUser.ID,
+				time.Now().UTC().Format(time.RFC3339))
+			if err != nil {
+				log.Fatalf("insert provider key %q: %v", p.Name, err)
+			}
+			log.Printf("imported: provider %q -> key_id=%s (type=%s, last4=...%s)", p.Name, keyID, providerType, last4)
+			imported++
 		}
 
-		// Resolve the key_ref to plaintext.
-		plaintext, err := resolveKeyRef(p.Auth.KeyRef)
-		if err != nil {
-			log.Fatalf("resolve key_ref for provider %q: %v", p.Name, err)
+		// Import the provider's models as routes (model override ?? provider
+		// default). The routes table is optional; if it does not exist yet,
+		// the insert fails and we skip gracefully.
+		for _, m := range p.Models {
+			routeImported += importRoute(ctx, db, keyID, p, m)
 		}
-
-		// Encrypt via Rust KeyVault.
-		encResp, err := kvClient.Encrypt(ctx, &pb.EncryptRequest{Plaintext: []byte(plaintext)})
-		if err != nil {
-			log.Fatalf("encrypt key for provider %q: %v", p.Name, err)
-		}
-		if encResp.Error != "" {
-			log.Fatalf("encrypt key for provider %q: %s", p.Name, encResp.Error)
-		}
-
-		// Insert into DB.
-		providerType := providerTypeFromKind(p.Kind)
-		last4 := computeLast4(plaintext)
-		_, err = db.ExecContext(ctx,
-			`INSERT INTO user_provider_keys (id, owner_user_id, provider_type, encrypted_key, key_last4, base_url, created_by, created_at, enabled)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-			keyID, adminUser.ID, providerType, encResp.Ciphertext, last4, p.BaseURL, adminUser.ID,
-			time.Now().UTC().Format(time.RFC3339))
-		if err != nil {
-			log.Fatalf("insert provider key %q: %v", p.Name, err)
-		}
-		log.Printf("imported: provider %q -> key_id=%s (type=%s, last4=...%s)", p.Name, keyID, providerType, last4)
-		imported++
-	}
-
-	// Import routes (into the routes table if it exists).
-	routeImported := 0
-	for _, r := range cfg.Routes {
-		keyID := "imp_" + r.Provider
-		// Insert route; ignore "table does not exist" (routes table is optional
-		// until the migration adds it).
-		_, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO routes (alias, provider, upstream_model, upstream_path, auth_method)
-			 VALUES (?, ?, ?, ?, ?)`,
-			r.Alias, keyID, r.UpstreamModel, r.UpstreamPath, r.AuthMethod)
-		if err != nil {
-			// Table may not exist yet; skip gracefully.
-			log.Printf("skip route %q: %v (routes table may not exist yet)", r.Alias, err)
-			continue
-		}
-		routeImported++
 	}
 
 	log.Printf("done: %d provider(s) imported, %d skipped, %d route(s) imported", imported, skipped, routeImported)
 	if imported > 0 {
 		log.Print("trigger a snapshot push (restart pingogate-ctrl or call POST /api/snapshot/push) to sync to the Rust kernel")
 	}
+}
+
+// importRoute inserts one model as a routes row, applying the model > provider
+// override chain so the stored row carries effective values. Returns 1 on
+// success, 0 if the routes table does not exist yet (skipped gracefully).
+func importRoute(ctx context.Context, db *storage.DB, keyID string, p providerCfg, m modelCfg) int {
+	kind := m.Kind
+	if kind == "" {
+		kind = p.Kind
+	}
+	auth := m.AuthMethod
+	if auth == "" {
+		auth = p.Auth.Method
+	}
+	path := m.UpstreamPath
+	if path == "" {
+		path = p.UpstreamPath
+	}
+	version := m.AnthropicVersion
+	if version == "" {
+		version = p.AnthropicVersion
+	}
+	timeout := m.TimeoutMs
+	if timeout == nil {
+		timeout = p.TimeoutMs
+	}
+
+	// Store timeout as nullable int (nil -> NULL).
+	var timeoutVal any
+	if timeout != nil {
+		timeoutVal = *timeout
+	}
+
+	_, err := db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO routes
+		 (alias, provider, upstream_model, upstream_path, auth_method, kind, anthropic_version, timeout_ms)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.Alias, keyID, m.UpstreamModel, path, auth, kind, version, timeoutVal)
+	if err != nil {
+		log.Printf("skip route %q: %v (routes table may not exist yet)", m.Alias, err)
+		return 0
+	}
+	return 1
 }
 
 // resolveKeyRef resolves an env:VAR or plain:value reference to plaintext.

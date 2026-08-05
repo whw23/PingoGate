@@ -2,6 +2,7 @@
 
 use super::*;
 use super::grpc_convert::build_runtime_snapshot;
+use pingogate_core_types::AuthMethod;
 use pingogate::ProviderEntry;
 
 fn make_provider_entry(name: &str, kind: &str, auth: &str, key_ref: &str) -> ProviderEntry {
@@ -14,6 +15,7 @@ fn make_provider_entry(name: &str, kind: &str, auth: &str, key_ref: &str) -> Pro
         anthropic_version: String::new(),
         capability_families: vec!["generation.stateless".to_string()],
         timeout_ms: None,
+        upstream_path: None,
     }
 }
 
@@ -29,6 +31,9 @@ fn build_runtime_snapshot_resolves_encrypted_key_ref() {
             upstream_model: "gpt-4o".to_string(),
             upstream_path: None,
             auth_method: None,
+            kind: None,
+            anthropic_version: None,
+            timeout_ms: None,
         }],
         virtual_keys: vec![],
         encrypted_keys: vec![EncryptedProviderKey {
@@ -130,7 +135,9 @@ fn build_runtime_snapshot_rejects_unknown_encrypted_key_ref() {
 }
 
 #[test]
-fn build_runtime_snapshot_rejects_incompatible_auth() {
+fn build_runtime_snapshot_accepts_independent_kind_and_auth() {
+    // kind is for protocol conversion; auth_method is independent (issue 4).
+    // openai-compatible kind + query_key auth is now allowed.
     use pingogate::{EncryptedProviderKey, Snapshot};
     let snap = Snapshot {
         version: 1,
@@ -144,9 +151,8 @@ fn build_runtime_snapshot_rejects_incompatible_auth() {
             created_by: "u".to_string(),
         }],
     };
-    let err = build_runtime_snapshot(&snap).unwrap_err();
-    assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    assert!(err.message().contains("not compatible"));
+    let rt = build_runtime_snapshot(&snap).unwrap();
+    assert_eq!(rt.providers[0].auth_method, AuthMethod::QueryKey);
 }
 
 #[test]
@@ -203,6 +209,9 @@ fn build_runtime_snapshot_rejects_route_to_unknown_provider() {
             upstream_model: "m".to_string(),
             upstream_path: None,
             auth_method: None,
+            kind: None,
+            anthropic_version: None,
+            timeout_ms: None,
         }],
         virtual_keys: vec![],
         encrypted_keys: vec![EncryptedProviderKey {

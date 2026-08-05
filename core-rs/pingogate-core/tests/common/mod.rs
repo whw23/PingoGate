@@ -28,10 +28,6 @@ pub const OPENAI_UPSTREAM_KEY: &str = "sk-upstream-openai";
 pub const ANTHROPIC_UPSTREAM_KEY: &str = "sk-upstream-anthropic";
 pub const GEMINI_UPSTREAM_KEY: &str = "sk-upstream-gemini";
 
-/// The three routes the default config ships with (S1 fixtures). Reload tests
-/// append to this to grow the route table across a SIGHUP.
-pub const DEFAULT_ROUTES: &str = include_str!("fixtures/routes-default.yaml");
-
 /// Reserve an ephemeral port by binding then dropping the listener.
 pub fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
@@ -58,14 +54,9 @@ pub struct Harness {
 
 impl Harness {
     /// Start a mock upstream and a gateway subprocess wired to it, serving the
-    /// default route table.
+    /// default model table.
     pub fn start() -> Self {
-        Self::start_with_routes(DEFAULT_ROUTES)
-    }
-
-    /// Start a gateway whose initial `routes:` block is `routes`.
-    pub fn start_with_routes(routes: &str) -> Self {
-        Self::spawn(routes, mock::MockUpstream::start())
+        Self::spawn(mock::MockUpstream::start())
     }
 
     /// Start a gateway backed by a gated mock; the returned [`mock::Gate`] holds
@@ -73,13 +64,13 @@ impl Harness {
     /// a request that is provably mid-flight (XII).
     pub fn start_gated() -> (Self, mock::Gate) {
         let (mock, gate) = mock::MockUpstream::start_gated();
-        (Self::spawn(DEFAULT_ROUTES, mock), gate)
+        (Self::spawn(mock), gate)
     }
 
-    fn spawn(routes: &str, mock: mock::MockUpstream) -> Self {
+    fn spawn(mock: mock::MockUpstream) -> Self {
         let public_port = free_port();
         let admin_port = free_port();
-        let config_path = write_config(public_port, admin_port, mock.port, routes);
+        let config_path = write_config(public_port, admin_port, mock.port);
 
         // `CARGO_BIN_EXE_pingogate-core` is set by Cargo when running integration
         // tests. This Cargo toolchain keeps the hyphen in the env var name (rather
@@ -124,15 +115,6 @@ impl Harness {
     /// The admin listener port (S2 wires endpoints onto it).
     pub fn admin_port(&self) -> u16 {
         self.admin_port
-    }
-
-    /// Rewrite the on-disk config with a new `routes:` block, then signal the
-    /// running gateway to reload it via `SIGHUP` (FR-019). The providers,
-    /// listeners, and gateway keys are unchanged.
-    pub fn reload_with_routes(&self, routes: &str) {
-        let yaml = render_config(self.public_port, self.admin_port, self.mock_port, routes);
-        std::fs::write(&self.config_path, yaml).expect("rewrite config");
-        self.sighup();
     }
 
     /// Overwrite the config file with arbitrary YAML, then send `SIGHUP`. Used to
@@ -191,19 +173,18 @@ impl Drop for Harness {
     }
 }
 
-/// Render the config template wired to the three mock-backed providers, with the
-/// given `routes:` block substituted in.
-fn render_config(public: u16, admin: u16, mock: u16, routes: &str) -> String {
+/// Render the config template wired to the three mock-backed providers.
+/// Models are nested under providers in the template (no external routes block).
+fn render_config(public: u16, admin: u16, mock: u16) -> String {
     include_str!("fixtures/gateway.yaml.tmpl")
         .replace("__PUBLIC__", &public.to_string())
         .replace("__ADMIN__", &admin.to_string())
         .replace("__MOCK__", &mock.to_string())
-        .replace("__ROUTES__", routes.trim_end_matches('\n'))
 }
 
 /// Write the rendered config to a unique temp path; return that path.
-fn write_config(public: u16, admin: u16, mock: u16, routes: &str) -> PathBuf {
-    let yaml = render_config(public, admin, mock, routes);
+fn write_config(public: u16, admin: u16, mock: u16) -> PathBuf {
+    let yaml = render_config(public, admin, mock);
     let path = std::env::temp_dir().join(format!(
         "pingogate-it-{}-{}.yaml",
         std::process::id(),

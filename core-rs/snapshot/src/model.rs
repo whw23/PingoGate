@@ -3,6 +3,13 @@
 //! Unknown fields are rejected (`deny_unknown_fields`) so typos fail validation
 //! rather than being silently ignored. These are raw parsed structs; semantic
 //! validation lives in [`crate::validate`] and resolution in [`crate::snapshot`].
+//!
+//! **Config hierarchy** (issue: model > provider > global):
+//! - Provider-level fields (kind, auth, timeout_ms, upstream_path,
+//!   anthropic_version) are defaults for all models under that provider.
+//! - Model-level fields are optional overrides; `None` = inherit from provider.
+//! - The resolved [`crate::snapshot::Route`] carries effective values after
+//!   applying the override chain.
 
 use pingogate_core_types::{CapabilityFamily, ProviderKind};
 use serde::Deserialize;
@@ -17,8 +24,6 @@ pub struct GatewayConfig {
     pub gateway_keys: Vec<GatewayKeyCfg>,
     #[serde(default)]
     pub providers: Vec<ProviderCfg>,
-    #[serde(default)]
-    pub routes: Vec<RouteCfg>,
     #[serde(default)]
     pub observability: Observability,
     #[serde(default)]
@@ -63,6 +68,8 @@ pub struct GatewayKeyCfg {
     pub enabled: bool,
 }
 
+/// Provider-level configuration. All fields except `name`/`kind`/`base_url`/
+/// `auth`/`capability_families` are defaults that models can override.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderCfg {
@@ -73,12 +80,44 @@ pub struct ProviderCfg {
     pub anthropic_version: Option<String>,
     pub auth: AuthCfg,
     pub capability_families: Vec<CapabilityFamily>,
-    /// Per-provider upstream timeout in milliseconds (issue 3: timeout should
-    /// follow the provider, not be global). Overrides `upstream.timeout_ms`
-    /// when set. Different providers have different latency profiles (e.g.
-    /// Anthropic may need longer than OpenAI).
+    /// Provider-level timeout default (ms). Overridden by model.timeout_ms.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// Provider-level upstream path template (supports `{model}`). Overridden
+    /// by model.upstream_path.
+    #[serde(default)]
+    pub upstream_path: Option<String>,
+    /// Models under this provider. Each model inherits provider defaults and
+    /// can override any of them.
+    #[serde(default)]
+    pub models: Vec<ModelCfg>,
+}
+
+/// Model-level configuration nested under a provider. `alias` and
+/// `upstream_model` are required; all other fields are optional overrides
+/// (`None` = inherit from the parent provider).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelCfg {
+    /// Client-visible model name (what the client sends in the `model` field).
+    pub alias: String,
+    /// Actual model name at the upstream provider.
+    pub upstream_model: String,
+    /// Override the provider's kind for this model (for protocol conversion).
+    #[serde(default)]
+    pub kind: Option<ProviderKind>,
+    /// Override the provider's auth method for this model.
+    #[serde(default)]
+    pub auth_method: Option<AuthMethodKind>,
+    /// Override the provider's anthropic_version for this model.
+    #[serde(default)]
+    pub anthropic_version: Option<String>,
+    /// Override the provider's timeout_ms for this model.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    /// Override the provider's upstream_path template for this model.
+    #[serde(default)]
+    pub upstream_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,28 +134,6 @@ pub enum AuthMethodKind {
     Bearer,
     ApiKeyHeader,
     QueryKey,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RouteCfg {
-    pub alias: String,
-    pub provider: String,
-    pub upstream_model: String,
-    /// Upstream path template (issue 2: paths are not hardcoded). Supports
-    /// `{model}` placeholder substituted with `upstream_model` at request time.
-    /// When set, the forwarded path is rewritten to this template (prepended
-    /// with the provider base_path) instead of the original inbound path.
-    /// Example: "/v1/chat/completions" or "/api/v2/models/{model}/generate".
-    #[serde(default)]
-    pub upstream_path: Option<String>,
-    /// Auth method override (issue 1: one provider, multiple protocols). When
-    /// set, uses this auth method instead of the provider's default. Allows a
-    /// single upstream to serve different protocols with different auth styles
-    /// (e.g. OpenAI-compatible Bearer for Chat, Anthropic api_key_header for
-    /// Messages).
-    #[serde(default)]
-    pub auth_method: Option<AuthMethodKind>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -161,7 +178,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_minimal_config_with_defaults() {
+    fn parses_nested_models_with_overrides() {
         let yaml = r#"
 listeners:
   public: { address: "0.0.0.0:8080" }
@@ -174,11 +191,23 @@ providers:
     base_url: "https://api.openai.com"
     auth: { method: "bearer", key_ref: "env:OPENAI_API_KEY" }
     capability_families: ["generation.stateless"]
-routes:
-  - { alias: "gpt-4o", provider: "openai-main", upstream_model: "gpt-4o" }
+    timeout_ms: 120000
+    models:
+      - alias: "gpt-4o"
+        upstream_model: "gpt-4o"
+      - alias: "o1-pro"
+        upstream_model: "o1-pro"
+        timeout_ms: 300000
+        upstream_path: "/v1/responses"
 "#;
         let cfg = GatewayConfig::from_yaml(yaml).unwrap();
-        assert_eq!(cfg.providers[0].kind, ProviderKind::OpenaiCompatible);
+        assert_eq!(cfg.providers[0].models.len(), 2);
+        assert_eq!(cfg.providers[0].models[0].alias, "gpt-4o");
+        assert_eq!(cfg.providers[0].models[1].timeout_ms, Some(300_000));
+        assert_eq!(
+            cfg.providers[0].models[1].upstream_path.as_deref(),
+            Some("/v1/responses")
+        );
         assert!(cfg.gateway_keys[0].enabled, "enabled defaults to true");
         assert_eq!(cfg.upstream.timeout_ms, 60_000, "timeout default applied");
     }

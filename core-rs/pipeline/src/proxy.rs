@@ -144,10 +144,12 @@ impl ProxyHttp for GatewayProxy {
         // specifies an auth_method override, use it instead of the provider's
         // default. The key is still the provider's key.
         let effective_auth_method = ctx.route_auth_override.unwrap_or(provider.auth_method);
+        let effective_anthropic_version = ctx.route_anthropic_version.as_deref();
         let auth = crate::upstream_auth::build_upstream_auth_with_method(
             &self.keyvault,
             provider,
             effective_auth_method,
+            effective_anthropic_version,
         )?;
         wire::apply_upstream_auth(upstream_request, auth, &mut path)?;
         if let Some(host) = host {

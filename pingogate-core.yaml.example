@@ -5,7 +5,13 @@
 #   1. 复制为 pingogate-core.yaml
 #   2. 设置 .env 中的环境变量（或用 plain: 内联明文，见下方示例）
 #   3. 启动：./pingogate-core（或 cargo run -p pingogate-core）
-#   4. 客户端改 base_url 指向网关，token 用网关 key，model 用别名
+#   4. 客户端改 base_url 指向网关，token 用网关 key，model 用模型别名
+#
+# 配置层级（model > provider > global）：
+#   - global: upstream.timeout_ms（全局默认超时）
+#   - provider: kind / base_url / auth / timeout_ms / upstream_path / anthropic_version
+#   - model: 嵌套在 provider 下，可覆盖 provider 任一参数
+#   未覆盖的参数自动继承父层级。
 #
 # 热重载：
 #   修改本文件后，SIGHUP / 文件监视 / POST /reload 任一触发原子切换
@@ -26,109 +32,126 @@ gateway_keys:
   - { name: "team-beta",  secret_ref: "env:PINGO_KEY_BETA",  enabled: true }
 
 # ---- 上游 Provider（可配多个，不同平台/不同协议）----
+# provider 级字段是 models 的默认值；model 可覆盖其中任意一个。
+#
 # kind: openai-compatible | anthropic | gemini
+#   - 上游协议族，用于协议识别与后续的接口协议转换
+#   - 不决定 auth 方式（auth 独立配置，见下）
 # auth.method: bearer | api_key_header | query_key
 # auth.key_ref: env:VAR_NAME 或 plain:内联明文（宪法 XX，不推荐生产用 plain:）
-# timeout_ms: 可选，per-provider 超时覆盖（覆盖全局 upstream.timeout_ms）
+# timeout_ms: 可选，provider 级默认超时（覆盖全局 upstream.timeout_ms）
+# upstream_path: 可选，provider 级默认上游路径模板（支持 {model} 占位符）
 providers:
-  # OpenAI 官方 - 用 env 引用密钥
+  # ============ OpenAI 官方（标准 Chat Completions）============
   - name: "openai-official"
     kind: "openai-compatible"
     base_url: "https://api.openai.com"
     auth: { method: "bearer", key_ref: "env:OPENAI_API_KEY" }
     capability_families: ["generation.stateless"]
-    timeout_ms: 120000  # OpenAI 偶尔慢，给 2 分钟
+    timeout_ms: 120000                      # provider 默认 2 分钟
+    models:
+      # gpt-4o / gpt-4o-mini 全部继承 provider 默认
+      - { alias: "gpt-4o",       upstream_model: "gpt-4o" }
+      - { alias: "gpt-4o-mini",  upstream_model: "gpt-4o-mini" }
+      # o3-pro 走 OpenAI Responses API：覆盖 kind
+      # （真实场景中若 o3 只支持 Responses，则此 model 用 kind=openai-responses）
+      - alias: "o3-pro"
+        upstream_model: "o3-pro"
+        timeout_ms: 300000                   # o3 推理慢，覆盖为 5 分钟
 
-  # Anthropic 官方
+  # ============ Anthropic 官方 ============
   - name: "anthropic-official"
     kind: "anthropic"
     base_url: "https://api.anthropic.com"
-    anthropic_version: "2023-06-01"
+    anthropic_version: "2023-06-01"         # provider 级默认版本头
     auth: { method: "api_key_header", key_ref: "env:ANTHROPIC_API_KEY" }
     capability_families: ["generation.stateless"]
-    timeout_ms: 180000  # Anthropic 长文本生成更慢
+    timeout_ms: 180000                      # Anthropic 长文本生成更慢
+    models:
+      - { alias: "claude-sonnet", upstream_model: "claude-3-5-sonnet-latest" }
+      - { alias: "claude-haiku",  upstream_model: "claude-3-5-haiku-latest" }
 
-  # Google Gemini 官方
+  # ============ Google Gemini 官方 ============
   - name: "gemini-official"
     kind: "gemini"
     base_url: "https://generativelanguage.googleapis.com"
     auth: { method: "query_key", key_ref: "env:GEMINI_API_KEY" }
     capability_families: ["generation.stateless"]
     # 不设 timeout_ms -> 用全局 upstream.timeout_ms
+    models:
+      - { alias: "gemini-pro",   upstream_model: "gemini-1.5-pro" }
+      - { alias: "gemini-flash", upstream_model: "gemini-1.5-flash" }
 
-  # 第二个 OpenAI-compatible 平台（自建代理 / Azure OpenAI / 第三方）
+  # ============ 第二个 OpenAI-compatible 平台（自建代理 / Azure）============
   # 用 plain: 内联明文（方便本地开发，生产用 env:）
   - name: "my-proxy"
     kind: "openai-compatible"
     base_url: "https://my-proxy.example.com"
     auth: { method: "bearer", key_ref: "plain:sk-my-proxy-inline-key-xxxxxx" }
     capability_families: ["generation.stateless"]
+    models:
+      - { alias: "custom-gpt", upstream_model: "my-custom-model" }
 
-  # 同一平台但不同协议（issue 1: 一个上游接入不同模型用不同接口模式）
-  # 这个平台同时支持 OpenAI Chat 风格和 Anthropic Messages 风格
-  # 配两个 provider 指向同一 base_url，不同 kind + auth
-  - name: "multi-platform-openai"
-    kind: "openai-compatible"
+  # ============ 同一平台，两种协议风格（issue: 一个上游多接口模式）============
+  # 一个上游同时支持 OpenAI Chat 风格 + Anthropic Messages 风格。
+  # 通过 per-model kind + auth 覆盖实现，共用同一密钥。
+  - name: "multi-platform"
+    kind: "openai-compatible"               # 默认 OpenAI 风格
     base_url: "https://multi.example.com"
     auth: { method: "bearer", key_ref: "env:MULTI_PLATFORM_KEY" }
     capability_families: ["generation.stateless"]
-  - name: "multi-platform-anthropic"
-    kind: "anthropic"
-    base_url: "https://multi.example.com"
-    anthropic_version: "2023-06-01"
-    auth: { method: "api_key_header", key_ref: "env:MULTI_PLATFORM_KEY" }
-    capability_families: ["generation.stateless"]
+    models:
+      # 模型 A 用 OpenAI Chat Completions（继承默认）
+      - { alias: "mp-gpt", upstream_model: "gpt-4o" }
+      # 模型 B 用 Anthropic Messages 风格：覆盖 kind + auth + version
+      - alias: "mp-claude"
+        upstream_model: "claude-3.5-sonnet"
+        kind: "anthropic"
+        auth_method: "api_key_header"
+        anthropic_version: "2023-06-01"
 
-  # 自定义路径上游（issue 2: 上游路径不是 /v1/chat/completions）
-  # 这个平台用 /api/v2/models/{model}/generate 而非标准路径
+  # ============ 自定义上游路径（issue: 路径不是 /v1/chat/completions）============
+  # 上游用 /api/v2/models/{model}/generate 而非标准路径。
+  # {model} 会被替换为 upstream_model 的值。
   - name: "custom-path-proxy"
     kind: "openai-compatible"
     base_url: "https://custom.example.com"
     auth: { method: "bearer", key_ref: "env:CUSTOM_PATH_KEY" }
     capability_families: ["generation.stateless"]
+    upstream_path: "/api/v2/models/{model}/generate"   # provider 级默认路径
+    models:
+      - { alias: "custom-gen", upstream_model: "my-model" }
+      # 某个模型走不同路径：覆盖 upstream_path
+      - alias: "custom-gen-old"
+        upstream_model: "my-model-old"
+        upstream_path: "/v1/legacy/chat/completions"
 
-# ---- 路由（模型别名 -> provider + 上游模型名）----
-# 客户端传 model: "<alias>"，网关路由到对应 provider，注入该 provider 的 key
-# upstream_path: 可选，上游路径模板（支持 {model} 占位符），不设 = 透传客户端路径
-# auth_method: 可选，per-route auth 覆盖（允许同 provider 不同 route 用不同 auth）
-routes:
-  # ---- 标准 OpenAI 官方模型 ----
-  - { alias: "gpt-4o",       provider: "openai-official", upstream_model: "gpt-4o" }
-  - { alias: "gpt-4o-mini",  provider: "openai-official", upstream_model: "gpt-4o-mini" }
-  - { alias: "o3-pro",       provider: "openai-official", upstream_model: "o3-pro" }
+  # ============ 自定义协议代理（issue: 协议转换）============
+  # 代理把 OpenAI Chat 转成内部协议（未来协议转换引擎的目标）。
+  # kind 只声明协议族，auth 独立。
+  - name: "weird-proxy"
+    kind: "openai-compatible"               # 对外是 OpenAI 风格
+    base_url: "https://weird.example.com"
+    auth: { method: "bearer", key_ref: "env:WEIRD_KEY" }
+    capability_families: ["generation.stateless"]
+    models:
+      # 这个模型用 Anthropic 协议 + Bearer auth（某些代理这么干）
+      - alias: "weird-1"
+        upstream_model: "special-model"
+        kind: "anthropic"
+        auth_method: "bearer"
+        upstream_path: "/anthropic/v1/messages"
+        anthropic_version: "2023-06-01"
 
-  # ---- Anthropic 模型 ----
-  - { alias: "claude-sonnet", provider: "anthropic-official", upstream_model: "claude-3-5-sonnet-latest" }
-  - { alias: "claude-haiku",  provider: "anthropic-official", upstream_model: "claude-3-5-haiku-latest" }
-
-  # ---- Gemini 模型 ----
-  - { alias: "gemini-pro",   provider: "gemini-official", upstream_model: "gemini-1.5-pro" }
-  - { alias: "gemini-flash", provider: "gemini-official", upstream_model: "gemini-1.5-flash" }
-
-  # ---- 自建平台模型（标准路径透传）----
-  - { alias: "custom-gpt",   provider: "my-proxy", upstream_model: "my-custom-model" }
-
-  # ---- 同一平台不同协议（issue 1）----
-  # multi-platform 的 gpt 风格模型走 openai-compatible provider
-  - { alias: "mp-gpt-4o",    provider: "multi-platform-openai", upstream_model: "gpt-4o" }
-  # multi-platform 的 claude 风格模型走 anthropic provider（同一密钥，不同 auth）
-  - { alias: "mp-claude",    provider: "multi-platform-anthropic", upstream_model: "claude-3.5-sonnet" }
-
-  # ---- 自定义上游路径（issue 2）----
-  # 上游不是 /v1/chat/completions，而是 /api/v2/models/{model}/generate
-  # {model} 会被替换为 upstream_model 的值
-  - alias: "custom-gen"
-    provider: "custom-path-proxy"
-    upstream_model: "my-model"
-    upstream_path: "/api/v2/models/{model}/generate"
-
-  # ---- 自定义上游路径 + auth 覆盖（issue 1+2 组合）----
-  # 上游用 Anthropic 协议但 Bearer auth（某些代理这么干）
-  - alias: "weird-proxy"
-    provider: "custom-path-proxy"
-    upstream_model: "special-model"
-    upstream_path: "/anthropic/v1/messages"
-    auth_method: "bearer"
-
-# ---- 上游超时（全局默认，per-provider timeout_ms 覆盖此值）----
+# ---- 上游超时（全局默认，provider/model 的 timeout_ms 覆盖此值）----
 upstream: { timeout_ms: 60000 }
+
+# ---- Token 统计维度（自动提取，无需配置）----
+# 网关自动从上游响应提取并按维度持久化：
+#   input_tokens      输入 token（prompt）
+#   output_tokens     输出 token（completion）
+#   reasoning_tokens  推理 token（o1/o3/Claude thinking 等）
+#   cache_read_tokens 缓存读取（命中 prompt cache，降成本）
+#   cache_write_tokens 缓存写入（创建 prompt cache）
+# 各 provider 的字段名差异（OpenAI prompt_tokens / Anthropic input_tokens /
+# Gemini promptTokenCount）由内核自动归一化。

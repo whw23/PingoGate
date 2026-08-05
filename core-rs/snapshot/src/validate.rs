@@ -9,7 +9,8 @@ use std::collections::HashSet;
 
 use pingogate_core_types::{ProviderKind, SecretError};
 
-use crate::model::{AuthMethodKind, GatewayConfig};
+use crate::model::GatewayConfig;
+
 /// A single semantic problem, located by a dotted config path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationError {
@@ -56,24 +57,35 @@ pub fn validate_semantics(cfg: &GatewayConfig) -> Result<(), ConfigError> {
         "providers",
         &mut errs,
     );
-    check_unique(
-        cfg.routes.iter().map(|r| r.alias.as_str()),
-        "routes",
-        &mut errs,
-    );
+
+    // Model aliases must be unique across ALL providers (the client sends a
+    // model name; it must resolve to exactly one provider+model).
+    let mut global_aliases: HashSet<&str> = HashSet::new();
+    for (i, p) in cfg.providers.iter().enumerate() {
+        for (j, m) in p.models.iter().enumerate() {
+            if !global_aliases.insert(m.alias.as_str()) {
+                errs.push(ValidationError::new(
+                    format!("providers[{i}].models[{j}].alias"),
+                    format!("duplicate model alias across providers: {}", m.alias),
+                ));
+            }
+        }
+    }
 
     for (i, p) in cfg.providers.iter().enumerate() {
-        if !auth_compatible(p.kind, p.auth.method) {
-            errs.push(ValidationError::new(
-                format!("providers[{i}].auth.method"),
-                format!("auth method is not compatible with kind {}", p.kind),
-            ));
-        }
+        // Anthropic kind requires anthropic_version (at provider or model level).
+        // The effective check is at resolution time; here we only check the
+        // provider-level default when the kind is anthropic and no model
+        // overrides it. We defer the full effective check to snapshot build.
         if p.kind == ProviderKind::Anthropic && p.anthropic_version.is_none() {
-            errs.push(ValidationError::new(
-                format!("providers[{i}].anthropic_version"),
-                "anthropic provider requires anthropic_version",
-            ));
+            // Check if all models also lack anthropic_version override.
+            let all_missing = p.models.iter().all(|m| m.anthropic_version.is_none());
+            if all_missing && !p.models.is_empty() {
+                errs.push(ValidationError::new(
+                    format!("providers[{i}].anthropic_version"),
+                    "anthropic provider requires anthropic_version (set at provider or model level)",
+                ));
+            }
         }
         if p.capability_families.is_empty() {
             errs.push(ValidationError::new(
@@ -81,30 +93,24 @@ pub fn validate_semantics(cfg: &GatewayConfig) -> Result<(), ConfigError> {
                 "at least one capability family is required",
             ));
         }
-    }
 
-    let provider_names: HashSet<&str> = cfg.providers.iter().map(|p| p.name.as_str()).collect();
-    let provider_kinds: std::collections::HashMap<&str, ProviderKind> = cfg
-        .providers
-        .iter()
-        .map(|p| (p.name.as_str(), p.kind))
-        .collect();
-    for (i, r) in cfg.routes.iter().enumerate() {
-        if !provider_names.contains(r.provider.as_str()) {
-            errs.push(ValidationError::new(
-                format!("routes[{i}].provider"),
-                format!("unknown provider: {}", r.provider),
-            ));
-        }
-        // Validate auth_method override compatibility (issue 1).
-        if let Some(method) = r.auth_method {
-            if let Some(&kind) = provider_kinds.get(r.provider.as_str()) {
-                if !auth_compatible(kind, method) {
+        // Validate model-level overrides.
+        for (j, m) in p.models.iter().enumerate() {
+            // Effective kind = model ?? provider.
+            let effective_kind = m.kind.unwrap_or(p.kind);
+
+            // Anthropic kind with effective anthropic_version check.
+            if effective_kind == ProviderKind::Anthropic {
+                let effective_version = m
+                    .anthropic_version
+                    .as_deref()
+                    .or(p.anthropic_version.as_deref());
+                if effective_version.is_none() {
                     errs.push(ValidationError::new(
-                        format!("routes[{i}].auth_method"),
+                        format!("providers[{i}].models[{j}].anthropic_version"),
                         format!(
-                            "auth method {method:?} is not compatible with provider {} kind {kind}",
-                            r.provider
+                            "model {} has effective anthropic kind but no anthropic_version (set at provider or model level)",
+                            m.alias
                         ),
                     ));
                 }
@@ -117,15 +123,6 @@ pub fn validate_semantics(cfg: &GatewayConfig) -> Result<(), ConfigError> {
     } else {
         Err(ConfigError::Invalid(errs))
     }
-}
-
-fn auth_compatible(kind: ProviderKind, method: AuthMethodKind) -> bool {
-    matches!(
-        (kind, method),
-        (ProviderKind::OpenaiCompatible, AuthMethodKind::Bearer)
-            | (ProviderKind::Anthropic, AuthMethodKind::ApiKeyHeader)
-            | (ProviderKind::Gemini, AuthMethodKind::QueryKey)
-    )
 }
 
 fn check_unique<'a>(
@@ -160,13 +157,30 @@ listeners:
 "#;
 
     #[test]
-    fn route_referencing_unknown_provider_is_rejected() {
+    fn duplicate_alias_across_providers_is_rejected() {
         let yaml = format!(
-            "{BASE_LISTENERS}routes:\n  - {{ alias: \"a\", provider: \"missing\", upstream_model: \"m\" }}\n"
+            r#"{BASE_LISTENERS}providers:
+  - name: "p1"
+    kind: "openai-compatible"
+    base_url: "https://x"
+    auth: {{ method: "bearer", key_ref: "env:K" }}
+    capability_families: ["generation.stateless"]
+    models:
+      - {{ alias: "dup", upstream_model: "a" }}
+  - name: "p2"
+    kind: "openai-compatible"
+    base_url: "https://y"
+    auth: {{ method: "bearer", key_ref: "env:K2" }}
+    capability_families: ["generation.stateless"]
+    models:
+      - {{ alias: "dup", upstream_model: "b" }}
+"#
         );
         let err = validate_semantics(&cfg(&yaml)).unwrap_err();
         match err {
-            ConfigError::Invalid(v) => assert_eq!(v[0].path, "routes[0].provider"),
+            ConfigError::Invalid(v) => {
+                assert!(v.iter().any(|e| e.message.contains("duplicate model alias")));
+            }
             _ => panic!("expected Invalid"),
         }
     }
@@ -174,7 +188,15 @@ listeners:
     #[test]
     fn anthropic_without_version_is_rejected() {
         let yaml = format!(
-            "{BASE_LISTENERS}providers:\n  - name: \"a\"\n    kind: \"anthropic\"\n    base_url: \"https://x\"\n    auth: {{ method: \"api_key_header\", key_ref: \"env:K\" }}\n    capability_families: [\"generation.stateless\"]\n"
+            r#"{BASE_LISTENERS}providers:
+  - name: "a"
+    kind: "anthropic"
+    base_url: "https://x"
+    auth: {{ method: "api_key_header", key_ref: "env:K" }}
+    capability_families: ["generation.stateless"]
+    models:
+      - {{ alias: "claude", upstream_model: "claude-3" }}
+"#
         );
         let err = validate_semantics(&cfg(&yaml)).unwrap_err();
         assert!(
@@ -183,17 +205,35 @@ listeners:
     }
 
     #[test]
-    fn incompatible_auth_method_is_rejected() {
+    fn anthropic_model_override_satisfies_version() {
         let yaml = format!(
-            "{BASE_LISTENERS}providers:\n  - name: \"a\"\n    kind: \"openai-compatible\"\n    base_url: \"https://x\"\n    auth: {{ method: \"query_key\", key_ref: \"env:K\" }}\n    capability_families: [\"generation.stateless\"]\n"
+            r#"{BASE_LISTENERS}providers:
+  - name: "a"
+    kind: "anthropic"
+    base_url: "https://x"
+    auth: {{ method: "api_key_header", key_ref: "env:K" }}
+    capability_families: ["generation.stateless"]
+    models:
+      - alias: "claude"
+        upstream_model: "claude-3"
+        anthropic_version: "2023-06-01"
+"#
         );
-        assert!(validate_semantics(&cfg(&yaml)).is_err());
+        assert!(validate_semantics(&cfg(&yaml)).is_ok());
     }
 
     #[test]
     fn minimal_valid_config_passes() {
         let yaml = format!(
-            "{BASE_LISTENERS}providers:\n  - name: \"openai-main\"\n    kind: \"openai-compatible\"\n    base_url: \"https://api.openai.com\"\n    auth: {{ method: \"bearer\", key_ref: \"env:K\" }}\n    capability_families: [\"generation.stateless\"]\nroutes:\n  - {{ alias: \"gpt-4o\", provider: \"openai-main\", upstream_model: \"gpt-4o\" }}\n"
+            r#"{BASE_LISTENERS}providers:
+  - name: "openai-main"
+    kind: "openai-compatible"
+    base_url: "https://api.openai.com"
+    auth: {{ method: "bearer", key_ref: "env:K" }}
+    capability_families: ["generation.stateless"]
+    models:
+      - {{ alias: "gpt-4o", upstream_model: "gpt-4o" }}
+"#
         );
         assert!(validate_semantics(&cfg(&yaml)).is_ok());
     }

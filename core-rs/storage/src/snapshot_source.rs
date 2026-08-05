@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn file_source_builds_snapshot_from_yaml() {
-        let yaml = "listeners:\n  public: { address: \"0.0.0.0:8080\" }\n  admin: { address: \"127.0.0.1:9090\" }\ngateway_keys:\n  - { name: \"a\", secret_ref: \"env:PINGO_KEY_ALPHA\" }\nproviders:\n  - { name: \"openai-main\", kind: \"openai-compatible\", base_url: \"https://api.openai.com\", auth: { method: \"bearer\", key_ref: \"env:OPENAI_API_KEY\" }, capability_families: [\"generation.stateless\"] }\nroutes:\n  - { alias: \"gpt-4o\", provider: \"openai-main\", upstream_model: \"gpt-4o\" }\nupstream: { timeout_ms: 60000 }\n";
+        let yaml = "listeners:\n  public: { address: \"0.0.0.0:8080\" }\n  admin: { address: \"127.0.0.1:9090\" }\ngateway_keys:\n  - { name: \"a\", secret_ref: \"env:PINGO_KEY_ALPHA\" }\nproviders:\n  - name: \"openai-main\"\n    kind: \"openai-compatible\"\n    base_url: \"https://api.openai.com\"\n    auth: { method: \"bearer\", key_ref: \"env:OPENAI_API_KEY\" }\n    capability_families: [\"generation.stateless\"]\n    models:\n      - { alias: \"gpt-4o\", upstream_model: \"gpt-4o\" }\nupstream: { timeout_ms: 60000 }\n";
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/test_config.yaml");
         std::fs::write(&path, yaml).unwrap();
         std::env::set_var("PINGO_KEY_ALPHA", "test-key");

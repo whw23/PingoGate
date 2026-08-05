@@ -81,7 +81,7 @@ mod tests {
     use std::io::Write;
     use std::path::PathBuf;
 
-    fn config_with_routes(routes: &str) -> String {
+    fn config_with_routes(models: &str) -> String {
         format!(
             "listeners:\n\
              \x20 public: {{ address: \"0.0.0.0:8080\" }}\n\
@@ -94,7 +94,7 @@ mod tests {
              \x20\x20\x20 base_url: \"https://x\"\n\
              \x20\x20\x20 auth: {{ method: \"bearer\", key_ref: \"env:PINGO_RELOAD_KEY\" }}\n\
              \x20\x20\x20 capability_families: [\"generation.stateless\"]\n\
-             routes:\n{routes}"
+             \x20\x20\x20 models:\n{models}"
         )
     }
 
@@ -110,7 +110,7 @@ mod tests {
         std::env::set_var("PINGO_RELOAD_GW", "gw");
         std::env::set_var("PINGO_RELOAD_KEY", "sk");
         let yaml =
-            config_with_routes("  - { alias: \"a\", provider: \"p\", upstream_model: \"m\" }\n");
+            config_with_routes("      - { alias: \"a\", upstream_model: \"m\" }\n");
         let cfg = GatewayConfig::from_yaml(&yaml).unwrap();
         let snap = RuntimeSnapshot::build(&cfg, &pingogate_storage::EnvSecretResolver, 1).unwrap();
         let holder = Arc::new(SnapshotHolder::new(snap));
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn successful_reload_advances_version_and_applies_routes() {
         let yaml = config_with_routes(
-            "  - { alias: \"a\", provider: \"p\", upstream_model: \"m\" }\n  - { alias: \"b\", provider: \"p\", upstream_model: \"m2\" }\n",
+            "      - { alias: \"a\", upstream_model: \"m\" }\n      - { alias: \"b\", upstream_model: \"m2\" }\n",
         );
         let path = write_tmp("ok", &yaml);
         let reloader = reloader_for(path.clone());
@@ -135,8 +135,9 @@ mod tests {
 
     #[test]
     fn rejected_reload_keeps_active_snapshot() {
+        // Duplicate model alias fails validation (keeps active snapshot).
         let yaml = config_with_routes(
-            "  - { alias: \"a\", provider: \"missing\", upstream_model: \"m\" }\n",
+            "      - { alias: \"a\", upstream_model: \"m\" }\n      - { alias: \"a\", upstream_model: \"m2\" }\n",
         );
         let path = write_tmp("bad", &yaml);
         let reloader = reloader_for(path.clone());

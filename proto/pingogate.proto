@@ -46,15 +46,19 @@ message ProviderEntry {
   string encrypted_key_ref = 5;  // 引用 encrypted_keys 中的 id
   string anthropic_version = 6;
   repeated string capability_families = 7;
-  optional uint64 timeout_ms = 8;  // per-provider 超时覆盖 (issue 3)
+  optional uint64 timeout_ms = 8;      // per-provider 超时覆盖
+  optional string upstream_path = 9;   // per-provider 上游路径模板
 }
 
 message RouteEntry {
   string alias = 1;
   string provider = 2;
   string upstream_model = 3;
-  optional string upstream_path = 4;  // 上游路径模板,支持 {model} 占位符 (issue 2)
-  optional string auth_method = 5;    // per-route auth 覆盖 (issue 1)
+  optional string upstream_path = 4;    // 上游路径模板,支持 {model} 占位符
+  optional string auth_method = 5;      // per-route auth 覆盖
+  optional string kind = 6;             // per-route kind 覆盖 (协议转换)
+  optional string anthropic_version = 7; // per-route anthropic_version 覆盖
+  optional uint64 timeout_ms = 8;       // per-route 超时覆盖
 }
 
 message EncryptedProviderKey {

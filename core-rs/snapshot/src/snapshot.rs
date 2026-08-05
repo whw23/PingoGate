@@ -5,10 +5,10 @@
 //! resolves every secret reference eagerly (so a missing key fails the build,
 //! not a live request - FR-022), and freezes the result behind `Arc`.
 //!
-//! S1 ships standalone-mode plaintext keys (env-resolved). Platform-mode
-//! ciphertext provider keys arrive in S2 via the KeyVault; the `key` field on
-//! [`ResolvedProvider`] is the single home for the resolved [`SecretString`] in
-//! either mode (constitution XX).
+//! **Config hierarchy resolution** (model > provider > global): for each model
+//! under a provider, the resolved [`Route`] carries the *effective* value of
+//! each parameter (model override ?? provider default). The hot path reads
+//! these effective values directly from the snapshot without re-resolving.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use pingogate_core_types::{
     AuthMethod, CapabilityFamily, ProviderKind, SecretResolver, SecretString,
 };
 
-use crate::model::{AuthMethodKind, GatewayConfig};
+use crate::model::{AuthMethodKind, GatewayConfig, ModelCfg};
 use crate::validate::{validate_semantics, ConfigError};
 
 /// A provider with its secret resolved and auth method normalized.
@@ -30,65 +30,57 @@ pub struct ResolvedProvider {
     pub auth_method: AuthMethod,
     /// Standalone mode: env-resolved plaintext (set at build time). Platform
     /// mode: empty placeholder - the hot path decrypts `encrypted_key` per
-    /// request via the KeyVault into a transient `SecretString` (constitution XX:
-    /// "明文仅在 `KeyVault::decrypt()` 返回的 `SecretString` 中存活").
+    /// request via the KeyVault (constitution XX).
     pub key: SecretString,
     /// Platform mode only: AES-GCM ciphertext of the provider key (`nonce ||
     /// ciphertext`, 12-byte random nonce prefix). `None` in standalone mode.
-    /// The Go control plane pushes this; the Rust kernel decrypts once per
-    /// hot-path request. Ciphertext is arbitrary bytes (not UTF-8), so it lives
-    /// here as `Vec<u8>` rather than in `key: SecretString`.
     pub encrypted_key: Option<Vec<u8>>,
     pub anthropic_version: Option<String>,
     pub capability_families: Vec<CapabilityFamily>,
-    /// Per-provider timeout override (issue 3). `None` = use global
-    /// `upstream.timeout_ms`.
+    /// Provider-level timeout default (ms). `None` = use global.
     pub timeout_ms: Option<u64>,
+    /// Provider-level upstream path template. `None` = forward inbound path.
+    pub upstream_path: Option<String>,
 }
 
-/// A model-alias route resolved to a provider + upstream model.
+/// A resolved model route with effective parameter values (model override ??
+/// provider default). The hot path reads these directly without re-resolving.
 #[derive(Debug, Clone)]
 pub struct Route {
     pub alias: String,
     pub provider: String,
     pub upstream_model: String,
-    /// Upstream path template with `{model}` placeholder (issue 2). `None` =
-    /// forward the original inbound path (existing behavior).
+    /// Effective upstream protocol kind (model ?? provider). For future
+    /// protocol conversion (constitution VI: "转换引擎").
+    pub kind: ProviderKind,
+    /// Effective auth method (model ?? provider).
+    pub auth_method: AuthMethod,
+    /// Effective anthropic_version (model ?? provider).
+    pub anthropic_version: Option<String>,
+    /// Effective timeout (model ?? provider). `None` = use global.
+    pub timeout_ms: Option<u64>,
+    /// Effective upstream path template (model ?? provider). `None` = forward
+    /// inbound path.
     pub upstream_path: Option<String>,
-    /// Auth method override (issue 1). `None` = use provider's default.
-    pub auth_method: Option<AuthMethod>,
 }
 
 /// An enabled gateway key with its secret resolved (in-memory only; never logged).
 #[derive(Debug, Clone)]
 pub struct GatewayKey {
     pub name: String,
-    /// The resolved gateway-key plaintext. Keyed implicitly by this secret for
-    /// authentication (`authenticate_gateway_key` compares against it).
     pub secret: SecretString,
 }
 
-/// A virtual key entry (platform mode, S3). Mirrors the proto `VirtualKeyEntry`
-/// (T24): an opaque token presented by the caller, authenticated by hash
-/// comparison, scoped to a provider key + model/provider allowlists. The Rust
-/// kernel reads this from the [`RuntimeSnapshot`] on the hot path; the Go
-/// control plane pushes it via gRPC (constitution X).
+/// A virtual key entry (platform mode, S3). Mirrors the proto `VirtualKeyEntry`.
 #[derive(Debug, Clone)]
 pub struct VirtualKeyEntry {
     pub id: String,
-    /// Hash (bcrypt or SHA-256) of the presented token. Compared in constant
-    /// time on the hot path (constitution XX).
     pub token_hash: String,
-    /// Owner user id (BYOK visibility: only this user can view the plaintext
-    /// provider key the virtual key references; constitution XX).
     pub owner_user_id: String,
-    /// References `EncryptedProviderKey.id` in the snapshot's `encrypted_keys`.
     pub provider_key_id: String,
     pub allowed_models: Vec<String>,
     pub allowed_providers: Vec<String>,
-    /// Unix timestamp; 0 = never expires.
     pub expires_at: i64,
-    /// Concurrency quota; 0 = unlimited.
     pub max_concurrency: i32,
     pub enabled: bool,
 }
@@ -100,29 +92,14 @@ pub struct UpstreamConfig {
 }
 
 /// An immutable view of runtime configuration. Cloned cheaply via `Arc`.
-///
-/// Fields are public per the S1 contract; the data path reads them directly on
-/// the hot path. Lookup helpers (`route`, `provider`, `authenticate_gateway_key`)
-/// are provided for convenience but iterate the vectors (small N).
 #[derive(Debug)]
 pub struct RuntimeSnapshot {
     pub version: u64,
     pub providers: Vec<ResolvedProvider>,
     pub routes: Vec<Route>,
     pub gateway_keys: Vec<GatewayKey>,
-    /// Platform mode (S3): virtual keys pushed by the Go control plane. Empty
-    /// in standalone mode (which uses `gateway_keys`).
     pub virtual_keys: Vec<VirtualKeyEntry>,
-    /// key_id -> owner_user_id (S3 dual-defense: Rust hot path can reject a
-    /// virtual key whose `provider_key_id` is not owned by the virtual key's
-    /// `owner_user_id` without a round-trip to Go). Built from
-    /// `encrypted_keys` at snapshot build time (constitution XX).
     pub key_owners: HashMap<String, String>,
-    /// key_id -> AES-GCM ciphertext (`nonce || ciphertext`). The hot path
-    /// decrypts per request via the KeyVault (constitution XX: "明文仅在
-    /// `KeyVault::decrypt()` 返回的 `SecretString` 中存活"). Empty in
-    /// standalone mode (which resolves plaintext env refs into
-    /// `ResolvedProvider::key`).
     pub encrypted_keys: HashMap<String, Vec<u8>>,
     pub upstream: UpstreamConfig,
 }
@@ -136,25 +113,13 @@ impl RuntimeSnapshot {
     ) -> Result<Arc<Self>, ConfigError> {
         validate_semantics(config)?;
         let providers = resolve_providers(config, resolver)?;
-        let routes = config
-            .routes
-            .iter()
-            .map(|r| Route {
-                alias: r.alias.clone(),
-                provider: r.provider.clone(),
-                upstream_model: r.upstream_model.clone(),
-                upstream_path: r.upstream_path.clone(),
-                auth_method: r.auth_method.map(map_auth),
-            })
-            .collect();
+        let routes = resolve_routes(&providers, config);
         let gateway_keys = resolve_gateway_keys(config, resolver)?;
         Ok(Arc::new(Self {
             version,
             providers,
             routes,
             gateway_keys,
-            // Standalone mode has no virtual keys, no ciphertext, no owner
-            // mapping (constitution X: platform-mode fields stay empty).
             virtual_keys: Vec::new(),
             key_owners: HashMap::new(),
             encrypted_keys: HashMap::new(),
@@ -164,7 +129,7 @@ impl RuntimeSnapshot {
         }))
     }
 
-    /// Look up a route by alias.
+    /// Look up a route by alias (client-visible model name).
     pub fn route(&self, alias: &str) -> Option<&Route> {
         self.routes.iter().find(|r| r.alias == alias)
     }
@@ -213,13 +178,52 @@ fn resolve_providers(
             anthropic_version: p.anthropic_version.clone(),
             capability_families: p.capability_families.clone(),
             timeout_ms: p.timeout_ms,
+            upstream_path: p.upstream_path.clone(),
         });
     }
     Ok(providers)
 }
 
-/// Resolve secrets for enabled gateway keys; disabled ones are skipped (and
-/// their secret reference is never resolved, so it need not exist).
+/// Resolve all model routes from the config, applying the model > provider
+/// override chain for each parameter.
+fn resolve_routes(providers: &[ResolvedProvider], config: &GatewayConfig) -> Vec<Route> {
+    let mut routes = Vec::new();
+    for p in &config.providers {
+        // Find the resolved provider to get defaults.
+        let resolved = providers.iter().find(|rp| rp.name == p.name);
+        let resolved = match resolved {
+            Some(r) => r,
+            None => continue, // validate_semantics should have caught this
+        };
+        for m in &p.models {
+            let route = resolve_one_route(m, resolved);
+            routes.push(route);
+        }
+    }
+    routes
+}
+
+/// Resolve a single model route, applying the override chain.
+fn resolve_one_route(m: &ModelCfg, provider: &ResolvedProvider) -> Route {
+    Route {
+        alias: m.alias.clone(),
+        provider: provider.name.clone(),
+        upstream_model: m.upstream_model.clone(),
+        kind: m.kind.unwrap_or(provider.kind),
+        auth_method: m
+            .auth_method
+            .map(map_auth)
+            .unwrap_or(provider.auth_method),
+        anthropic_version: m
+            .anthropic_version
+            .clone()
+            .or(provider.anthropic_version.clone()),
+        timeout_ms: m.timeout_ms.or(provider.timeout_ms),
+        upstream_path: m.upstream_path.clone().or(provider.upstream_path.clone()),
+    }
+}
+
+/// Resolve secrets for enabled gateway keys; disabled ones are skipped.
 fn resolve_gateway_keys(
     config: &GatewayConfig,
     resolver: &dyn SecretResolver,
@@ -253,12 +257,6 @@ impl SnapshotHolder {
         }
     }
 
-    /// Create a holder with an empty version-0 snapshot (platform mode). The
-    /// holder is "not ready" until the Go control plane pushes the first real
-    /// snapshot via gRPC and `store` swaps it in (spec §12B: readyz not-ready
-    /// until first snapshot). `version == 0` is the sentinel for "no snapshot
-    /// applied yet"; [`HealthService`](../grpc/struct.HealthServiceImpl.html)
-    /// reports `ready: false` while it sees version 0.
     pub fn empty() -> Self {
         Self {
             inner: ArcSwap::from(Arc::new(RuntimeSnapshot {
@@ -274,19 +272,14 @@ impl SnapshotHolder {
         }
     }
 
-    /// Load the active snapshot as a cheap `Guard` lease. The guard derefs to
-    /// `RuntimeSnapshot`, so callers read fields directly. In-flight requests
-    /// that need to outlive a swap should take an `Arc` via `load_full`.
     pub fn load(&self) -> Guard<Arc<RuntimeSnapshot>> {
         self.inner.load()
     }
 
-    /// Load the active snapshot as a full `Arc` (keeps it alive across swaps).
     pub fn load_full(&self) -> Arc<RuntimeSnapshot> {
         self.inner.load_full()
     }
 
-    /// Atomically install a new snapshot.
     pub fn store(&self, next: Arc<RuntimeSnapshot>) {
         self.inner.store(next);
     }
@@ -295,4 +288,3 @@ impl SnapshotHolder {
 #[cfg(test)]
 #[path = "snapshot_tests.rs"]
 mod tests;
-

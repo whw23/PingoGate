@@ -6,24 +6,18 @@
 //! testable without a live Pingora session.
 
 use http::Uri;
-use pingogate_core_types::{AppError, AuthMethod, CapabilityFamily};
+use pingogate_core_types::{AppError, AuthMethod, CapabilityFamily, ProviderKind};
 use pingogate_snapshot::RuntimeSnapshot;
 
 /// A provider base URL resolved to a connectable peer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpstreamTarget {
-    /// `host:port`, DNS-resolved by Pingora at connect time.
     pub addr: String,
-    /// Whether to dial over TLS (verified upstream cert; constitution XX).
     pub tls: bool,
-    /// TLS SNI and the `Host` header sent upstream.
     pub sni: String,
-    /// Path prefix from the base URL (`""` or `/prefix`, no trailing slash),
-    /// prepended to the forwarded inbound path.
     pub base_path: String,
 }
 
-/// Parse a provider `base_url` into an [`UpstreamTarget`].
 pub fn parse_base_url(base_url: &str) -> Result<UpstreamTarget, AppError> {
     let uri: Uri = base_url.parse().map_err(|_| AppError::Internal {
         message: format!("invalid provider base_url: {base_url}"),
@@ -53,29 +47,27 @@ pub fn parse_base_url(base_url: &str) -> Result<UpstreamTarget, AppError> {
     })
 }
 
-/// Full routing resolution with timeout and path/auth overrides (issue 1/2/3).
+/// Full routing resolution with effective params (model > provider > global).
 #[derive(Debug)]
 pub struct RouteResolution {
     pub provider: String,
     pub upstream_model: String,
     pub target: UpstreamTarget,
-    /// Effective timeout: per-provider override or global default (issue 3).
     pub timeout_ms: u64,
-    /// Upstream path template with `{model}` placeholder, if configured (issue 2).
+    /// Effective upstream path template (model ?? provider). `None` = forward
+    /// inbound path.
     pub upstream_path: Option<String>,
-    /// Per-route auth method override, if configured (issue 1).
+    /// Effective auth method (model ?? provider).
     pub auth_override: Option<AuthMethod>,
+    /// Effective upstream kind (model ?? provider). For future protocol
+    /// conversion (constitution VI).
+    pub kind: ProviderKind,
+    /// Effective anthropic_version (model ?? provider).
+    pub anthropic_version: Option<String>,
 }
 
-/// Resolve a model alias to its provider name, upstream model name, and
-/// connectable target, enforcing the provider's declared capability gate
-/// (FR-006/FR-007). The returned `upstream_model` is the provider's actual
-/// model name (not the alias) and is surfaced to the Go usage estimator so it
-/// can pick the correct tokenizer encoding.
-///
-/// Returns the effective timeout (per-provider override or global) and the
-/// route's upstream_path template + auth_override alongside the standard
-/// routing info (issue 1/2/3).
+/// Resolve a model alias to its provider, upstream model, connectable target,
+/// and all effective parameters.
 pub fn resolve_route(
     snapshot: &RuntimeSnapshot,
     alias: &str,
@@ -101,7 +93,7 @@ pub fn resolve_route(
         });
     }
     let target = parse_base_url(&provider.base_url)?;
-    let timeout_ms = provider
+    let timeout_ms = route
         .timeout_ms
         .unwrap_or(snapshot.upstream.timeout_ms);
     Ok(RouteResolution {
@@ -110,13 +102,16 @@ pub fn resolve_route(
         target,
         timeout_ms,
         upstream_path: route.upstream_path.clone(),
-        auth_override: route.auth_method,
+        // The route already has effective auth_method; we pass it as an override
+        // over the provider's default (which is the same value after resolution,
+        // but this keeps the proxy logic simple: always use the route's auth).
+        auth_override: Some(route.auth_method),
+        kind: route.kind,
+        anthropic_version: route.anthropic_version.clone(),
     })
 }
 
-/// Expand an upstream_path template by substituting `{model}` with the resolved
-/// upstream model name (issue 2). Returns the expanded path. If the template is
-/// `None`, returns `None` (caller keeps the original inbound path).
+/// Expand an upstream_path template by substituting `{model}`.
 pub fn expand_upstream_path(template: &str, upstream_model: &str) -> String {
     template.replace("{model}", upstream_model)
 }

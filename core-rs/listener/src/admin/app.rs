@@ -179,8 +179,8 @@ providers:
     base_url: "https://x"
     auth: { method: "bearer", key_ref: "env:PINGO_APP_TEST_KEY" }
     capability_families: ["generation.stateless"]
-routes:
-  - { alias: "a", provider: "p", upstream_model: "m" }
+    models:
+      - { alias: "a", upstream_model: "m" }
 "#;
         let config = GatewayConfig::from_yaml(yaml).unwrap();
         let snapshot = RuntimeSnapshot::build(&config, &EnvSecretResolver, 1).unwrap();

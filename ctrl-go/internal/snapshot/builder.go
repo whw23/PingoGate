@@ -76,14 +76,18 @@ type keyRow struct {
 
 // routeRow is the subset of routes columns the Builder needs. Routes are
 // optional: if the routes table has no rows, the snapshot has no routes and
-// the Rust kernel returns NoRoute for every request (issue 1/2: routes carry
-// upstream_path + auth_method overrides).
+// the Rust kernel returns NoRoute for every request. Each route is a model
+// under a provider; upstream_path/auth_method/kind/anthropic_version/timeout_ms
+// are model-level overrides.
 type routeRow struct {
-	Alias         string `db:"alias"`
-	Provider      string `db:"provider"`
-	UpstreamModel string `db:"upstream_model"`
-	UpstreamPath  string `db:"upstream_path"`
-	AuthMethod    string `db:"auth_method"`
+	Alias            string `db:"alias"`
+	Provider         string `db:"provider"`
+	UpstreamModel    string `db:"upstream_model"`
+	UpstreamPath     string `db:"upstream_path"`
+	AuthMethod       string `db:"auth_method"`
+	Kind             string `db:"kind"`
+	AnthropicVersion string `db:"anthropic_version"`
+	TimeoutMs        *uint64 `db:"timeout_ms"`
 }
 
 // Build reads user_provider_keys and assembles a proto Snapshot with the given
@@ -184,9 +188,10 @@ func providerNames(providers []*pb.ProviderEntry) map[string]bool {
 // buildRoutes reads the routes table and assembles proto RouteEntry messages.
 // Routes referencing unknown providers are skipped (defensive: a stale route
 // after a key deletion should not fail the whole push). The routes table is
-// optional; if it does not exist yet (pre-migration), returns nil (issue 1/2).
+// optional; if it does not exist yet (pre-migration), returns nil.
 func (b *Builder) buildRoutes(ctx context.Context, validProviders map[string]bool) ([]*pb.RouteEntry, error) {
-	const q = `SELECT alias, provider, upstream_model, upstream_path, auth_method
+	const q = `SELECT alias, provider, upstream_model, upstream_path, auth_method,
+	                  kind, anthropic_version, timeout_ms
 	           FROM routes
 	           ORDER BY alias ASC`
 	var rows []routeRow
@@ -213,6 +218,18 @@ func (b *Builder) buildRoutes(ctx context.Context, validProviders map[string]boo
 		if r.AuthMethod != "" {
 			am := r.AuthMethod
 			entry.AuthMethod = &am
+		}
+		if r.Kind != "" {
+			k := r.Kind
+			entry.Kind = &k
+		}
+		if r.AnthropicVersion != "" {
+			av := r.AnthropicVersion
+			entry.AnthropicVersion = &av
+		}
+		if r.TimeoutMs != nil {
+			tm := *r.TimeoutMs
+			entry.TimeoutMs = &tm
 		}
 		entries = append(entries, entry)
 	}

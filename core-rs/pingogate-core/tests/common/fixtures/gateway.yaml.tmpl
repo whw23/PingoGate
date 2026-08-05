@@ -14,6 +14,9 @@ providers:
       method: "bearer"
       key_ref: "env:OPENAI_KEY"
     capability_families: ["generation.stateless"]
+    models:
+      - alias: "gpt-4o"
+        upstream_model: "gpt-4o"
   - name: "anthropic-up"
     kind: "anthropic"
     base_url: "http://127.0.0.1:__MOCK__"
@@ -22,6 +25,9 @@ providers:
       method: "api_key_header"
       key_ref: "env:ANTHROPIC_KEY"
     capability_families: ["generation.stateless"]
+    models:
+      - alias: "claude-3-5-sonnet"
+        upstream_model: "claude-3-5-sonnet"
   - name: "gemini-up"
     kind: "gemini"
     base_url: "http://127.0.0.1:__MOCK__"
@@ -29,5 +35,6 @@ providers:
       method: "query_key"
       key_ref: "env:GEMINI_KEY"
     capability_families: ["generation.stateless"]
-routes:
-__ROUTES__
+    models:
+      - alias: "gemini-1.5-pro"
+        upstream_model: "gemini-1.5-pro"
