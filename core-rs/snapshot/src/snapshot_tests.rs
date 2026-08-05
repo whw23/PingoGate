@@ -168,7 +168,7 @@ providers:
     RuntimeSnapshot::build(&cfg, &EnvResolver, version).unwrap()
 }
 
-/// The checked-in `pingogate-core.yaml.example` must always parse with the
+/// The checked-in `pingogate-core.example.yaml` must always parse with the
 /// current schema (prevents doc/schema drift). Semantic validation is skipped
 /// here (it requires resolving env/plain secrets), but the schema-level parse
 /// is enforced.
@@ -178,7 +178,7 @@ fn example_config_parses_with_current_schema() {
         .parent()
         .and_then(|p| p.parent()) // core-rs/snapshot -> core-rs -> repo root
         .unwrap()
-        .join("pingogate-core.yaml.example");
+        .join("pingogate-core.example.yaml");
     let yaml = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("cannot read example at {}", path.display()));
     let cfg = GatewayConfig::from_yaml(&yaml)
