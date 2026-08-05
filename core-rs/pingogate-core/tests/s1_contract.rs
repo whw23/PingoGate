@@ -56,15 +56,7 @@ fn six_interfaces_detected() {
         "Anthropic Messages must be detected"
     );
     assert!(
-        matches!(detect("POST", "/v1beta/models/m:generateContent"), pingogate_pipeline::protocol::Detection::Supported(_)),
-        "Gemini generateContent must be detected"
-    );
-    assert!(
-        matches!(detect("POST", "/v1beta/models/m:streamGenerateContent"), pingogate_pipeline::protocol::Detection::Supported(_)),
-        "Gemini streamGenerateContent must be detected"
-    );
-    assert!(
-        matches!(detect("POST", "/v1beta/models/m:interact"), pingogate_pipeline::protocol::Detection::Supported(_)),
+        matches!(detect("POST", "/v1beta/interactions"), pingogate_pipeline::protocol::Detection::Supported(_)),
         "Gemini Interactions must be detected"
     );
 }
@@ -79,11 +71,14 @@ fn version_prefix_is_wildcarded() {
     assert!(matches!(detect("POST", "/v1/chat/completions"), pingogate_pipeline::protocol::Detection::Supported(_)));
     assert!(matches!(detect("POST", "/v2/chat/completions"), pingogate_pipeline::protocol::Detection::Supported(_)));
     assert!(matches!(detect("POST", "/chat/completions"), pingogate_pipeline::protocol::Detection::Supported(_)));
+    assert!(matches!(detect("POST", "/v1beta/interactions"), pingogate_pipeline::protocol::Detection::Supported(_)));
+    assert!(matches!(detect("POST", "/v1/interactions"), pingogate_pipeline::protocol::Detection::Supported(_)));
+    // Gemini generateContent surfaces under different version prefixes.
     assert!(matches!(detect("POST", "/v1beta/models/m:generateContent"), pingogate_pipeline::protocol::Detection::Supported(_)));
     assert!(matches!(detect("POST", "/v1/models/m:generateContent"), pingogate_pipeline::protocol::Detection::Supported(_)));
 }
 
-// --- Extended ProtocolKind (T3: Responses + Interactions variants exist). ---
+// --- ProtocolKind (T3: Responses + Gemini + Interactions variants exist). ---
 
 #[test]
 fn protocol_kind_has_five_variants() {
@@ -92,7 +87,8 @@ fn protocol_kind_has_five_variants() {
     let _anthropic = ProtocolKind::Anthropic;
     let _gemini = ProtocolKind::Gemini;
     let _gemini_interactions = ProtocolKind::GeminiInteractions;
-    // as_str coverage for the two new variants (T3 contract).
+    // as_str coverage for the variants (T3 contract).
     assert_eq!(ProtocolKind::OpenAiResponses.as_str(), "openai-responses");
+    assert_eq!(ProtocolKind::Gemini.as_str(), "gemini");
     assert_eq!(ProtocolKind::GeminiInteractions.as_str(), "gemini-interactions");
 }

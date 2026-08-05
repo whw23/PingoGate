@@ -35,7 +35,7 @@ gateway_keys:
 # ---- 上游 Provider（可配多个，不同平台/不同协议）----
 # provider 级字段是 models 的默认值；model 可覆盖其中任意一个。
 #
-# kind: openai-compatible | anthropic | gemini
+# kind: openai-compatible | openai-responses | anthropic | gemini | gemini-interactions
 #   - 上游协议族，用于协议识别与后续的接口协议转换
 #   - 不决定 auth 方式（auth 独立配置，见下）
 # auth.method: bearer | api_key_header | query_key
@@ -72,16 +72,24 @@ providers:
       - { alias: "claude-sonnet", upstream_model: "claude-3-5-sonnet-latest" }
       - { alias: "claude-haiku",  upstream_model: "claude-3-5-haiku-latest" }
 
-  # ============ Google Gemini 官方 ============
+  # ============ Google Gemini 官方（Interactions API）============
+  # Gemini 有两种接口：stateless generateContent / streamGenerateContent
+  # （kind: gemini，model 在路径 /models/{model}:generateContent）和 stateful
+  # Interactions API（kind: gemini-interactions，POST /v1beta/interactions，
+  # model 在请求体 model 字段）。此处示例用 Interactions。
   - name: "gemini-official"
-    kind: "gemini"
+    kind: "gemini-interactions"
     base_url: "https://generativelanguage.googleapis.com"
     auth: { method: "query_key", key_ref: "env:GEMINI_API_KEY" }
     capability_families: ["generation.stateless"]
     # 不设 timeout_ms -> 用全局 upstream.timeout_ms
     models:
-      - { alias: "gemini-pro",   upstream_model: "gemini-1.5-pro" }
-      - { alias: "gemini-flash", upstream_model: "gemini-1.5-flash" }
+      - alias: "gemini-pro"
+        upstream_model: "gemini-3.5-flash"
+        upstream_path: "/v1beta/interactions"
+      - alias: "gemini-flash"
+        upstream_model: "gemini-3.5-flash-lite"
+        upstream_path: "/v1beta/interactions"
 
   # ============ 第二个 OpenAI-compatible 平台（自建代理 / Azure）============
   # 用 plain: 内联明文（方便本地开发，生产用 env:）

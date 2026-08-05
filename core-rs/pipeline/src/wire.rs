@@ -47,25 +47,28 @@ pub fn protocol_label(p: ProtocolKind) -> &'static str {
 }
 
 /// Extract the model alias presented by the client, draining the body when the
-/// protocol carries the model there (OpenAI/Anthropic). Retry buffering is
-/// enabled first so Pingora captures the drained body and replays it upstream
-/// verbatim - the H1 proxy never re-invokes `request_body_filter` for a body
-/// already drained here, so the native retry-buffer replay is what forwards it.
-/// The returned body is used only for streaming detection (`stream: true`).
+/// protocol carries the model there (OpenAI/Anthropic and Gemini
+/// Interactions). Retry buffering is enabled first so Pingora captures the
+/// drained body and replays it upstream verbatim - the H1 proxy never
+/// re-invokes `request_body_filter` for a body already drained here, so the
+/// native retry-buffer replay is what forwards it. The returned body is used
+/// only for streaming detection (`stream: true`).
 ///
-/// Gemini `generateContent`/`streamGenerateContent` and Gemini Interactions
-/// encode the model in the path (`/models/{model}:action`), so no body drain is
-/// needed for those.
+/// Gemini `generateContent`/`streamGenerateContent` encode the model in the
+/// path (`/models/{model}:action`), so no body drain is needed for those.
 pub async fn extract_model_and_body(
     session: &mut Session,
     protocol: ProtocolKind,
     path: &str,
 ) -> std::result::Result<(Option<String>, Option<Vec<u8>>), AppError> {
     match protocol {
-        ProtocolKind::Gemini | ProtocolKind::GeminiInteractions => {
-            Ok((router::model_from_gemini_path(path), None))
-        }
-        _ => {
+        // Gemini generateContent/streamGenerateContent carry the model in the
+        // path (`/models/{model}:action`), not the JSON body.
+        ProtocolKind::Gemini => Ok((router::model_from_gemini_path(path), None)),
+        ProtocolKind::OpenAiCompatible
+        | ProtocolKind::OpenAiResponses
+        | ProtocolKind::Anthropic
+        | ProtocolKind::GeminiInteractions => {
             session.enable_retry_buffering();
             let body = read_full_body(session).await?;
             Ok((router::model_from_body(&body), Some(body)))

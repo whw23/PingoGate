@@ -75,16 +75,16 @@ pub fn detect(method: &str, path: &str) -> Detection {
     if is_post && path.ends_with("/messages") {
         return supported(ProtocolKind::Anthropic, false);
     }
-    // Gemini streamGenerateContent (streaming proven by path)
+    // Gemini streamGenerateContent (streaming proven by path).
     if path.contains(":streamGenerateContent") {
         return supported(ProtocolKind::Gemini, true);
     }
-    // Gemini generateContent
+    // Gemini generateContent.
     if path.contains(":generateContent") {
         return supported(ProtocolKind::Gemini, false);
     }
-    // Gemini Interactions API action
-    if path.contains(":interact") {
+    // Gemini Interactions API: POST /v1beta/interactions (top-level resource).
+    if is_post && path.ends_with("/interactions") {
         return supported(ProtocolKind::GeminiInteractions, false);
     }
 
@@ -159,9 +159,9 @@ mod tests {
     }
 
     #[test]
-    fn detects_gemini_interactions() {
-        let d = detect("POST", "/v1beta/models/gemini-3.5-flash:interact");
-        assert!(matches!(d, Detection::Supported(Detected { protocol: ProtocolKind::GeminiInteractions, .. })));
+    fn detects_gemini_interactions_top_level_resource() {
+        let d = detect("POST", "/v1beta/interactions");
+        assert!(matches!(d, Detection::Supported(Detected { protocol: ProtocolKind::GeminiInteractions, streaming_by_path: false })));
     }
 
     #[test]

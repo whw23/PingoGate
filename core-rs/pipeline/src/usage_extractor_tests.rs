@@ -100,7 +100,38 @@ fn extracts_anthropic_cache_fields_from_message_start() {
     assert_eq!(tokens.cache_write, Some(4));
 }
 
-// --- UsageExtractor: Gemini ------------------------------------------
+// --- UsageExtractor: Gemini Interactions --------------------------------
+
+#[test]
+fn extracts_gemini_interactions_usage() {
+    // The Interaction object's usage block uses total_input_tokens etc.
+    let mut ex = UsageExtractor::new(ProtocolKind::GeminiInteractions);
+    ex.on_body_chunk(
+        b"data: {\"id\":\"v1_x\",\"status\":\"completed\",\"usage\":{\"total_input_tokens\":3,\
+         \"total_output_tokens\":7,\"total_thought_tokens\":1,\"total_cached_tokens\":2}}\n",
+        true,
+    );
+    let tokens = ex.finalize().expect("usage should be extracted");
+    assert_eq!(tokens.input, 3);
+    assert_eq!(tokens.output, 7);
+    assert_eq!(tokens.reasoning, Some(1));
+    assert_eq!(tokens.cache_read, Some(2));
+}
+
+#[test]
+fn gemini_interactions_streaming_events_without_usage_are_skipped() {
+    // Streaming SSE events before the final interaction carry no usage block;
+    // they must not produce a usage record.
+    let mut ex = UsageExtractor::new(ProtocolKind::GeminiInteractions);
+    ex.on_body_chunk(
+        b"data: {\"type\":\"step.start\",\"interaction_id\":\"v1_x\"}\n\
+         data: {\"type\":\"step.delta\",\"step\":{\"type\":\"model_output\",\"content\":[{\"text\":\"po\",\"type\":\"text\"}]}}\n",
+        false,
+    );
+    assert!(ex.finalize().is_none());
+}
+
+// --- UsageExtractor: Gemini (generateContent) -------------------------
 
 #[test]
 fn extracts_gemini_usage_metadata() {
@@ -112,21 +143,6 @@ fn extracts_gemini_usage_metadata() {
     let tokens = ex.finalize().expect("usage should be extracted");
     assert_eq!(tokens.input, 3);
     assert_eq!(tokens.output, 7);
-}
-
-#[test]
-fn extracts_gemini_interactions_usage_metadata() {
-    let mut ex = UsageExtractor::new(ProtocolKind::GeminiInteractions);
-    ex.on_body_chunk(
-        b"data: {\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":4,\
-         \"thoughtsTokenCount\":1,\"cachedContentTokenCount\":6}}\n",
-        true,
-    );
-    let tokens = ex.finalize().expect("usage should be extracted");
-    assert_eq!(tokens.input, 2);
-    assert_eq!(tokens.output, 4);
-    assert_eq!(tokens.reasoning, Some(1));
-    assert_eq!(tokens.cache_read, Some(6));
 }
 
 // --- UsageExtractor: OpenAI Responses --------------------------------
@@ -198,6 +214,18 @@ fn non_streaming_single_body() {
 }
 
 #[test]
+fn non_streaming_gemini_interactions_single_body() {
+    let mut ex = UsageExtractor::new(ProtocolKind::GeminiInteractions);
+    ex.on_body_chunk(
+        b"{\"id\":\"v1_x\",\"status\":\"completed\",\"usage\":{\"total_input_tokens\":4,\"total_output_tokens\":5}}",
+        true,
+    );
+    let tokens = ex.finalize().expect("usage should be extracted");
+    assert_eq!(tokens.input, 4);
+    assert_eq!(tokens.output, 5);
+}
+
+#[test]
 fn non_streaming_gemini_single_body() {
     let mut ex = UsageExtractor::new(ProtocolKind::Gemini);
     ex.on_body_chunk(
@@ -207,6 +235,30 @@ fn non_streaming_gemini_single_body() {
     let tokens = ex.finalize().expect("usage should be extracted");
     assert_eq!(tokens.input, 4);
     assert_eq!(tokens.output, 5);
+}
+
+#[test]
+fn non_streaming_pretty_printed_body_is_parsed_whole() {
+    // A pretty-printed (multi-line) non-streaming JSON body: the usage block
+    // spans several lines, so the whole body must be parsed as one object
+    // rather than line-split (on_complete_body path, used for !streaming).
+    let mut ex = UsageExtractor::new(ProtocolKind::GeminiInteractions);
+    let body = b"{\n  \"id\": \"v1_x\",\n  \"status\": \"completed\",\n  \"usage\": {\n    \"total_input_tokens\": 3,\n    \"total_output_tokens\": 7,\n    \"total_thought_tokens\": 1\n  }\n}";
+    ex.on_complete_body(body, true);
+    let tokens = ex.finalize().expect("usage should be extracted");
+    assert_eq!(tokens.input, 3);
+    assert_eq!(tokens.output, 7);
+    assert_eq!(tokens.reasoning, Some(1));
+}
+
+#[test]
+fn non_streaming_body_chunked_accumulates_and_parses_at_end() {
+    let mut ex = UsageExtractor::new(ProtocolKind::OpenAiCompatible);
+    ex.on_complete_body(br#"{"choices":[],"usage":{"prompt_tokens":9"#, false);
+    ex.on_complete_body(br#","completion_tokens":11}}"#, true);
+    let tokens = ex.finalize().expect("usage should be extracted");
+    assert_eq!(tokens.input, 9);
+    assert_eq!(tokens.output, 11);
 }
 
 // --- Negative cases ---------------------------------------------------
@@ -277,8 +329,9 @@ fn marker_matches_per_protocol() {
         b"data: {\"usageMetadata\":{}}",
         ProtocolKind::Gemini
     ));
+
     assert!(line_has_usage_marker(
-        b"data: {\"usageMetadata\":{}}",
+        b"data: {\"id\":\"v1_x\",\"status\":\"completed\",\"usage\":{}}",
         ProtocolKind::GeminiInteractions
     ));
 }

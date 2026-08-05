@@ -190,9 +190,11 @@ pub fn line_has_usage_marker(line: &[u8], protocol: ProtocolKind) -> bool {
             contains_subseq(line, b"message_start")
                 || contains_subseq(line, b"message_delta")
         }
-        ProtocolKind::Gemini | ProtocolKind::GeminiInteractions => {
-            contains_subseq(line, b"usageMetadata")
-        }
+        // Gemini generateContent / streamGenerateContent: `usageMetadata`.
+        ProtocolKind::Gemini => contains_subseq(line, b"usageMetadata"),
+        // Gemini Interactions: the interaction object carries a top-level
+        // `usage` block (`total_input_tokens` / `total_output_tokens` / ...).
+        ProtocolKind::GeminiInteractions => contains_subseq(line, b"\"usage\""),
     }
 }
 
@@ -220,7 +222,8 @@ pub fn extract_from_line(line: &[u8], protocol: ProtocolKind) -> Option<TokenUsa
         ProtocolKind::OpenAiCompatible => parse_openai_chat(&value),
         ProtocolKind::OpenAiResponses => parse_openai_responses(&value),
         ProtocolKind::Anthropic => parse_anthropic_event(&value),
-        ProtocolKind::Gemini | ProtocolKind::GeminiInteractions => parse_gemini(&value),
+        ProtocolKind::Gemini => parse_gemini(&value),
+        ProtocolKind::GeminiInteractions => parse_gemini_interactions(&value),
     }
 }
 
@@ -303,8 +306,10 @@ fn parse_anthropic_event(value: &Value) -> Option<TokenUsage> {
     None
 }
 
-/// Gemini / GeminiInteractions: `usageMetadata.promptTokenCount` /
-/// `candidatesTokenCount` / `thoughtsTokenCount` / `cachedContentTokenCount`.
+/// Gemini generateContent / streamGenerateContent: `usageMetadata` with
+/// `promptTokenCount` / `candidatesTokenCount` / `thoughtsTokenCount` /
+/// `cachedContentTokenCount`. Interactions uses a different `usage` shape
+/// (see [`parse_gemini_interactions`]).
 fn parse_gemini(value: &Value) -> Option<TokenUsage> {
     let usage = value.get("usageMetadata")?;
     Some(TokenUsage {
@@ -312,6 +317,21 @@ fn parse_gemini(value: &Value) -> Option<TokenUsage> {
         output: u64_at(usage, "candidatesTokenCount").unwrap_or(0),
         reasoning: u64_at(usage, "thoughtsTokenCount"),
         cache_read: u64_at(usage, "cachedContentTokenCount"),
+        cache_write: None,
+    })
+}
+
+/// Gemini Interactions: the `Interaction` object carries a top-level `usage`
+/// block with `total_input_tokens` / `total_output_tokens` /
+/// `total_thought_tokens` / `total_cached_tokens` (a different shape from the
+/// generateContent `usageMetadata`).
+fn parse_gemini_interactions(value: &Value) -> Option<TokenUsage> {
+    let usage = value.get("usage")?;
+    Some(TokenUsage {
+        input: u64_at(usage, "total_input_tokens").unwrap_or(0),
+        output: u64_at(usage, "total_output_tokens").unwrap_or(0),
+        reasoning: u64_at(usage, "total_thought_tokens"),
+        cache_read: u64_at(usage, "total_cached_tokens"),
         cache_write: None,
     })
 }

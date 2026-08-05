@@ -79,6 +79,10 @@ mod tests {
         let body2 = br#"{"contents":[],"stream":true}"#;
         let transformed2 = inject_include_usage(body2, ProtocolKind::Gemini, true);
         assert_eq!(transformed2, body2);
+        // Gemini Interactions carries usage natively in the interaction object.
+        let body3 = br#"{"model":"gemini-3.5-flash","input":"ping","stream":true}"#;
+        let transformed3 = inject_include_usage(body3, ProtocolKind::GeminiInteractions, true);
+        assert_eq!(transformed3, body3);
     }
 
     #[test]

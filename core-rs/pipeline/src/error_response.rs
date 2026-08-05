@@ -80,6 +80,14 @@ mod tests {
     }
 
     #[test]
+    fn gemini_generate_content_uses_gemini_envelope() {
+        let (status, bytes) = render(Some(ProtocolKind::Gemini), &AppError::AuthFailed);
+        assert_eq!(status, 401);
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"]["status"], "UNAUTHENTICATED");
+    }
+
+    #[test]
     fn unidentified_falls_back_to_native_envelope() {
         let (status, bytes) = render(None, &AppError::UnknownProtocol);
         assert_eq!(status, 400);

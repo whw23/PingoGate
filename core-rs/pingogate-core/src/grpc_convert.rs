@@ -206,8 +206,10 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
 fn parse_provider_kind(s: &str) -> Result<ProviderKind, String> {
     match s {
         "openai-compatible" => Ok(ProviderKind::OpenaiCompatible),
+        "openai-responses" => Ok(ProviderKind::OpenaiResponses),
         "anthropic" => Ok(ProviderKind::Anthropic),
         "gemini" => Ok(ProviderKind::Gemini),
+        "gemini-interactions" => Ok(ProviderKind::GeminiInteractions),
         other => Err(format!("unknown provider kind: {other}")),
     }
 }

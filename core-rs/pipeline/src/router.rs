@@ -1,14 +1,15 @@
 //! Model-alias extraction for routing (FR-016; research R3).
 //!
-//! The model name is read from the body (OpenAI/Anthropic `model`) or the path
-//! (Gemini `{model}`). This phase does **not** rewrite the model: the resolved
-//! route only selects the upstream provider; the body/path is forwarded
-//! unchanged (research R1). Route lookup against the snapshot is done by the
-//! pipeline via `RuntimeSnapshot::route`.
+//! The model name is read from the JSON body (OpenAI/Anthropic and Gemini
+//! Interactions `model` field) or the path (Gemini `{model}` for
+//! generateContent/streamGenerateContent). This phase does **not** rewrite the
+//! model: the resolved route only selects the upstream provider; the body/path
+//! is forwarded unchanged (research R1). Route lookup against the snapshot is
+//! done by the pipeline via `RuntimeSnapshot::route`.
 
 use pingogate_core_types::ProtocolKind;
 
-/// Extract the model alias from an OpenAI/Anthropic JSON request body.
+/// Extract the model alias from a JSON request body.
 pub fn model_from_body(body: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
     value.get("model")?.as_str().map(|s| s.to_string())
@@ -26,19 +27,16 @@ pub fn model_from_gemini_path(path: &str) -> Option<String> {
     }
 }
 
-/// Extract the model alias appropriate for `protocol`.
-///
-/// OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages all carry
-/// the model in the JSON body; Gemini `generateContent`/`streamGenerateContent`
-/// and Gemini Interactions both encode it in the path.
+/// Extract the model alias appropriate for `protocol`. Every supported protocol
+/// carries the model in the JSON body (`model` field) except Gemini
+/// `generateContent`/`streamGenerateContent`, which encode it in the path.
 pub fn extract_model(protocol: ProtocolKind, path: &str, body: &[u8]) -> Option<String> {
     match protocol {
         ProtocolKind::OpenAiCompatible
         | ProtocolKind::OpenAiResponses
-        | ProtocolKind::Anthropic => model_from_body(body),
-        ProtocolKind::Gemini | ProtocolKind::GeminiInteractions => {
-            model_from_gemini_path(path)
-        }
+        | ProtocolKind::Anthropic
+        | ProtocolKind::GeminiInteractions => model_from_body(body),
+        ProtocolKind::Gemini => model_from_gemini_path(path),
     }
 }
 
@@ -61,20 +59,25 @@ mod tests {
     #[test]
     fn reads_model_from_gemini_path() {
         let p = "/v1beta/models/gemini-1.5-pro:generateContent";
-        assert_eq!(model_from_gemini_path(p).as_deref(), Some("gemini-1.5-pro"));
+        assert_eq!(
+            model_from_gemini_path(p).as_deref(),
+            Some("gemini-1.5-pro")
+        );
         let s = "/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse";
         assert_eq!(
             model_from_gemini_path(s).as_deref(),
             Some("gemini-1.5-flash")
         );
+        assert_eq!(model_from_gemini_path("/v1beta/interactions"), None);
     }
 
     #[test]
-    fn reads_model_from_gemini_interactions_path() {
-        let p = "/v1beta/models/gemini-3.5-flash:interact";
+    fn extracts_model_from_gemini_interactions_body() {
+        // Gemini Interactions carries the model in the JSON body, not the path.
+        let body = br#"{"model":"gemini-3.5-flash-lite","input":"ping"}"#;
         assert_eq!(
-            model_from_gemini_path(p).as_deref(),
-            Some("gemini-3.5-flash")
+            model_from_body(body).as_deref(),
+            Some("gemini-3.5-flash-lite")
         );
     }
 
@@ -85,6 +88,16 @@ mod tests {
             extract_model(ProtocolKind::Anthropic, "/v1/messages", body).as_deref(),
             Some("claude-3-5-sonnet")
         );
+        let interactions = br#"{"model":"gemini-3.5-flash-lite","input":"ping"}"#;
+        assert_eq!(
+            extract_model(
+                ProtocolKind::GeminiInteractions,
+                "/v1beta/interactions",
+                interactions
+            )
+            .as_deref(),
+            Some("gemini-3.5-flash-lite")
+        );
         assert_eq!(
             extract_model(
                 ProtocolKind::Gemini,
@@ -93,15 +106,6 @@ mod tests {
             )
             .as_deref(),
             Some("g")
-        );
-        assert_eq!(
-            extract_model(
-                ProtocolKind::GeminiInteractions,
-                "/v1beta/models/gi:interact",
-                b""
-            )
-            .as_deref(),
-            Some("gi")
         );
         assert_eq!(
             extract_model(

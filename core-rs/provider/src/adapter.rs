@@ -18,11 +18,10 @@
 //! | `OpenAiCompatible` (Chat Completions)| `OpenAi`          | `Bearer`      | OpenAI      |
 //! | `OpenAiResponses` (Responses API)    | `OpenAi`          | `Bearer`      | OpenAI      |
 //! | `Anthropic` (Messages)               | `Anthropic`       | `ApiKeyHeader`| Anthropic   |
-//! | `Gemini` (generateContent / stream)  | `Gemini`          | `QueryKey`    | Gemini      |
 //! | `GeminiInteractions` (Interactions)  | `Gemini`          | `QueryKey`    | Gemini      |
 //!
-//! `streamGenerateContent` is the same Gemini protocol with a streaming flag
-//! (handled in protocol detection, T7); it shares `ProtocolKind::Gemini`.
+//! The legacy Gemini `generateContent`/`streamGenerateContent` surfaces were
+//! removed; Gemini is reached exclusively via the Interactions API.
 
 use pingogate_core_types::{AuthMethod, CapabilityFamily, ProtocolKind, ProviderKind};
 use serde_json::Value;
@@ -52,9 +51,8 @@ pub enum ProviderAdapter {
 
 impl ProviderAdapter {
     /// Return the adapter for an inbound [`ProtocolKind`]. Related protocols
-    /// (OpenAI Chat/Responses, Gemini generateContent/Interactions) share an
-    /// adapter because their auth method and error body shape are identical
-    /// (constitution II - do not duplicate).
+    /// (OpenAI Chat/Responses) share an adapter because their auth method and
+    /// error body shape are identical (constitution II - do not duplicate).
     pub fn for_protocol(protocol: ProtocolKind) -> Self {
         match protocol {
             ProtocolKind::OpenAiCompatible | ProtocolKind::OpenAiResponses => Self::OpenAi,
@@ -63,7 +61,7 @@ impl ProviderAdapter {
         }
     }
 
-    /// The upstream provider family this adapter represents.
+    /// The upstream provider interface this adapter represents.
     pub fn provider_kind(&self) -> ProviderKind {
         match self {
             Self::OpenAi => ProviderKind::OpenaiCompatible,
@@ -112,12 +110,12 @@ impl ProviderAdapter {
     }
 }
 
-/// Return the adapter for a provider family (by [`ProviderKind`]).
+/// Return the adapter for a provider interface (by [`ProviderKind`]).
 pub fn adapter_for(kind: ProviderKind) -> ProviderAdapter {
     match kind {
-        ProviderKind::OpenaiCompatible => ProviderAdapter::OpenAi,
+        ProviderKind::OpenaiCompatible | ProviderKind::OpenaiResponses => ProviderAdapter::OpenAi,
         ProviderKind::Anthropic => ProviderAdapter::Anthropic,
-        ProviderKind::Gemini => ProviderAdapter::Gemini,
+        ProviderKind::Gemini | ProviderKind::GeminiInteractions => ProviderAdapter::Gemini,
     }
 }
 
@@ -187,6 +185,13 @@ mod tests {
         ] {
             assert_eq!(adapter_for(kind).provider_kind(), kind);
         }
+        // GeminiInteractions shares the Gemini adapter, so it maps to the same
+        // adapter without round-tripping through `provider_kind` (adapter
+        // collapse, constitution II).
+        assert_eq!(
+            adapter_for(ProviderKind::GeminiInteractions),
+            ProviderAdapter::Gemini
+        );
     }
 
     #[test]

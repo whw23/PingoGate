@@ -6,21 +6,38 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Upstream provider family declared in configuration (`kind:` in YAML).
+/// Upstream provider interface declared in configuration (`kind:` in YAML).
+///
+/// Precise per *interface*, not per vendor family: the protocol-conversion
+/// engine (constitution VI) maps between the inbound protocol and this declared
+/// upstream interface, so `gemini` alone would be ambiguous (Gemini has several
+/// wire interfaces with different request/response shapes). Gemini exposes two
+/// interfaces this phase: the stateless `generateContent` /
+/// `streamGenerateContent` (`kind: gemini`) and the stateful Interactions API
+/// (`kind: gemini-interactions`, `POST /v1beta/interactions`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
+    /// OpenAI Chat Completions (`/chat/completions`).
     OpenaiCompatible,
+    /// OpenAI Responses API (`/responses`).
+    OpenaiResponses,
+    /// Anthropic Messages (`/messages`).
     Anthropic,
+    /// Google Gemini generateContent / streamGenerateContent (`:generateContent`).
     Gemini,
+    /// Google Gemini Interactions API (`POST /v1beta/interactions`).
+    GeminiInteractions,
 }
 
 impl ProviderKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::OpenaiCompatible => "openai-compatible",
+            Self::OpenaiResponses => "openai-responses",
             Self::Anthropic => "anthropic",
             Self::Gemini => "gemini",
+            Self::GeminiInteractions => "gemini-interactions",
         }
     }
 }
@@ -33,9 +50,11 @@ impl fmt::Display for ProviderKind {
 
 /// Inbound wire protocol identified from the request line/headers (research R3).
 ///
-/// Extended beyond the 001 source: `OpenAiResponses` (Responses API) and
-/// `GeminiInteractions` (Interactions API) are first-class protocols so the
-/// kernel can route stateful provider surfaces alongside stateless ones.
+/// OpenAI Chat/Responses and Anthropic Messages are stateless request-response;
+/// Gemini is reached through two surfaces: the stateless `generateContent` /
+/// `streamGenerateContent` (`ProtocolKind::Gemini`) and the stateful
+/// Interactions API (`ProtocolKind::GeminiInteractions`,
+/// `POST /v1beta/interactions`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolKind {
     /// OpenAI Chat Completions (`/v1/chat/completions`).
@@ -43,9 +62,9 @@ pub enum ProtocolKind {
     /// OpenAI Responses API (`/v1/responses`).
     OpenAiResponses,
     Anthropic,
-    /// Google Gemini `generateContent` / `streamGenerateContent`.
+    /// Google Gemini `generateContent` / `streamGenerateContent` (`:generateContent`).
     Gemini,
-    /// Google Gemini Interactions API.
+    /// Google Gemini Interactions API (`/v1beta/interactions`).
     GeminiInteractions,
 }
 
@@ -155,6 +174,7 @@ mod tests {
     #[test]
     fn protocol_kind_new_variants_have_stable_tokens() {
         assert_eq!(ProtocolKind::OpenAiResponses.as_str(), "openai-responses");
+        assert_eq!(ProtocolKind::Gemini.as_str(), "gemini");
         assert_eq!(
             ProtocolKind::GeminiInteractions.as_str(),
             "gemini-interactions"

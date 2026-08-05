@@ -1,13 +1,12 @@
-//! S1 e2e test (new): Gemini Interactions API passthrough.
+//! S1 e2e test: Gemini Interactions API passthrough.
 //!
-//! `POST /v1beta/models/{model}:interact` is identified as
-//! `ProtocolKind::GeminiInteractions` (T7 path-suffix detection), authenticated
-//! by gateway key (Bearer), routed by the `{model}` in the path, and forwarded
-//! with the gateway key stripped and the upstream credential injected as a
-//! `?key=` query parameter - body byte-for-byte unchanged. The Gemini
-//! Interactions adapter shares the same auth method (QueryKey) and error
-//! envelope as `generateContent` (T8 adapter collapse), so this test verifies
-//! the new protocol surface end-to-end through the five-protocol pipeline.
+//! `POST /v1beta/interactions` (top-level resource) is identified as
+//! `ProtocolKind::GeminiInteractions`, authenticated by gateway key (Bearer),
+//! routed by the `model` field in the JSON body, and forwarded with the gateway
+//! key stripped and the upstream credential injected as a `?key=` query
+//! parameter - body byte-for-byte unchanged. The legacy Gemini
+//! `generateContent`/`streamGenerateContent` and `:interact` surfaces were
+//! removed; the Interactions API is Gemini's primary interface.
 //!
 //! The mock upstream echoes the request body verbatim, which lets us assert the
 //! body was forwarded unchanged. A real Gemini Interactions endpoint would
@@ -24,8 +23,8 @@ use common::{Harness, GATEWAY_KEY, GEMINI_UPSTREAM_KEY};
 #[test]
 fn gemini_interactions_passthrough_appends_query_key() {
     let gw = Harness::start();
-    let body = br#"{"contents":[{"parts":[{"text":"hi"}]}]}"#;
-    let path = "/v1beta/models/gemini-1.5-pro:interact";
+    let body = br#"{"model":"gemini-1.5-pro","input":{"contents":[{"parts":[{"text":"hi"}]}]}}"#;
+    let path = "/v1beta/interactions";
 
     let resp = gw.send(
         &Request::post(path, body)
@@ -41,7 +40,7 @@ fn gemini_interactions_passthrough_appends_query_key() {
     let observed_path = resp.header("x-observed-path").unwrap_or("");
     assert!(
         observed_path.starts_with(path),
-        "interactions path prefix preserved: {observed_path}"
+        "interactions path preserved: {observed_path}"
     );
     assert!(
         observed_path.contains(&format!("key={expected_key}")),
@@ -56,8 +55,8 @@ fn gemini_interactions_passthrough_appends_query_key() {
 #[test]
 fn gemini_interactions_without_gateway_key_is_rejected() {
     let gw = Harness::start();
-    let body = br#"{"contents":[{"parts":[{"text":"hi"}]}]}"#;
-    let path = "/v1beta/models/gemini-1.5-pro:interact";
+    let body = br#"{"model":"gemini-1.5-pro","input":{"contents":[{"parts":[{"text":"hi"}]}]}}"#;
+    let path = "/v1beta/interactions";
 
     let resp = gw.send(&Request::post(path, body));
 
@@ -70,8 +69,8 @@ fn gemini_interactions_without_gateway_key_is_rejected() {
 #[test]
 fn gemini_interactions_unknown_model_returns_native_not_found() {
     let gw = Harness::start();
-    let body = br#"{"contents":[{"parts":[{"text":"hi"}]}]}"#;
-    let path = "/v1beta/models/does-not-exist:interact";
+    let body = br#"{"model":"does-not-exist","input":{"contents":[{"parts":[{"text":"hi"}]}]}}"#;
+    let path = "/v1beta/interactions";
 
     let resp = gw.send(
         &Request::post(path, body)

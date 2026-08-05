@@ -17,10 +17,9 @@
 //!   different details-block names than Chat Completions.
 //! - `Anthropic`: `usage.input_tokens` / `output_tokens` with
 //!   `cache_read_input_tokens` / `cache_creation_input_tokens`.
-//! - `Gemini` / `GeminiInteractions`: `usageMetadata.promptTokenCount` /
-//!   `candidatesTokenCount` / `thoughtsTokenCount` / `cachedContentTokenCount`.
-//!   Interactions is assumed to share the Gemini usage shape; if it diverges
-//!   upstream, the parser returns `None` (graceful degradation).
+//! - `GeminiInteractions` (Interactions API): the interaction object's
+//!   `usage` block with `total_input_tokens` / `total_output_tokens` /
+//!   `total_thought_tokens` / `total_cached_tokens`.
 
 use pingogate_core_types::ProtocolKind;
 use serde_json::Value;
@@ -55,7 +54,8 @@ pub fn parse_usage(protocol: ProtocolKind, body: &[u8]) -> Option<TokenUsage> {
         ProtocolKind::OpenAiCompatible => parse_openai_chat(&value),
         ProtocolKind::OpenAiResponses => parse_openai_responses(&value),
         ProtocolKind::Anthropic => parse_anthropic(&value),
-        ProtocolKind::Gemini | ProtocolKind::GeminiInteractions => parse_gemini(&value),
+        ProtocolKind::Gemini => parse_gemini(&value),
+        ProtocolKind::GeminiInteractions => parse_gemini_interactions(&value),
     }
 }
 
@@ -108,6 +108,10 @@ fn parse_anthropic(value: &Value) -> Option<TokenUsage> {
     })
 }
 
+/// Gemini generateContent / streamGenerateContent: `usageMetadata` with
+/// `promptTokenCount` / `candidatesTokenCount` / `thoughtsTokenCount` /
+/// `cachedContentTokenCount`. Interactions uses a different `usage` shape
+/// (see [`parse_gemini_interactions`]).
 fn parse_gemini(value: &Value) -> Option<TokenUsage> {
     let usage = value.get("usageMetadata")?;
     Some(TokenUsage {
@@ -115,6 +119,21 @@ fn parse_gemini(value: &Value) -> Option<TokenUsage> {
         output: u64_at(usage, "candidatesTokenCount").unwrap_or(0),
         reasoning: u64_at(usage, "thoughtsTokenCount"),
         cache_read: u64_at(usage, "cachedContentTokenCount"),
+        cache_write: None,
+    })
+}
+
+/// Gemini Interactions: the `Interaction` object carries a top-level `usage`
+/// block with `total_input_tokens` / `total_output_tokens` /
+/// `total_thought_tokens` / `total_cached_tokens` (not the generateContent
+/// `usageMetadata` shape).
+fn parse_gemini_interactions(value: &Value) -> Option<TokenUsage> {
+    let usage = value.get("usage")?;
+    Some(TokenUsage {
+        input: u64_at(usage, "total_input_tokens").unwrap_or(0),
+        output: u64_at(usage, "total_output_tokens").unwrap_or(0),
+        reasoning: u64_at(usage, "total_thought_tokens"),
+        cache_read: u64_at(usage, "total_cached_tokens"),
         cache_write: None,
     })
 }
@@ -172,11 +191,20 @@ mod tests {
     }
 
     #[test]
-    fn gemini_interactions_shares_gemini_usage_shape() {
-        let body = br#"{"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":4}}"#;
+    fn gemini_interactions_usage_uses_total_fields() {
+        // The Interaction object's usage block uses total_input_tokens etc.
+        let body = br#"{"id":"v1_x","status":"completed","usage":{"total_tokens":11,"total_input_tokens":2,"total_cached_tokens":1,"total_output_tokens":9,"total_thought_tokens":3}}"#;
         let usage = parse_usage(ProtocolKind::GeminiInteractions, body).unwrap();
-        assert_eq!(usage.input, 5);
-        assert_eq!(usage.output, 4);
+        assert_eq!(usage.input, 2);
+        assert_eq!(usage.output, 9);
+        assert_eq!(usage.reasoning, Some(3));
+        assert_eq!(usage.cache_read, Some(1));
+    }
+
+    #[test]
+    fn gemini_interactions_without_usage_yields_none() {
+        // Streaming events before the final interaction carry no usage block.
+        assert!(parse_usage(ProtocolKind::GeminiInteractions, br#"{"id":"v1_x","status":"in_progress","steps":[]}"#).is_none());
     }
 
     #[test]
