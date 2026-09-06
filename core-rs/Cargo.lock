@@ -1684,9 +1684,11 @@ dependencies = [
 name = "pingogate-provider"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "pingogate-core-types",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

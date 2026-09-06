@@ -81,6 +81,40 @@ fn disabled_gateway_key_is_skipped_and_secret_not_required() {
 }
 
 #[test]
+fn token_command_provider_carries_command_and_ttl() {
+    let yaml = r#"
+listeners:
+  public: { address: "0.0.0.0:8080" }
+  admin: { address: "127.0.0.1:9090" }
+gateway_keys:
+  - { name: "k", secret_ref: "plain:pg" }
+providers:
+  - name: "vertex-ai"
+    kind: "gemini"
+    base_url: "https://aiplatform.googleapis.com"
+    auth:
+      method: "token_command"
+      command: "gcloud auth application-default print-access-token"
+      token_ttl_secs: 900
+    capability_families: ["generation.stateless"]
+    models:
+      - alias: "v-flash"
+        upstream_model: "gemini-3.5-flash"
+"#;
+    let cfg = GatewayConfig::from_yaml(yaml).unwrap();
+    let snap = RuntimeSnapshot::build(&cfg, &EnvResolver, 1).unwrap();
+    let p = snap.provider("vertex-ai").unwrap();
+    assert_eq!(p.auth_method, AuthMethod::TokenCommand);
+    assert_eq!(
+        p.auth_command.as_deref(),
+        Some("gcloud auth application-default print-access-token")
+    );
+    assert_eq!(p.token_ttl_secs, Some(900));
+    // No key_ref needed: the token comes from the command, not a static secret.
+    assert_eq!(p.key.expose(), "");
+}
+
+#[test]
 fn missing_provider_secret_fails_build_not_runtime() {
     let yaml = r#"
 listeners:

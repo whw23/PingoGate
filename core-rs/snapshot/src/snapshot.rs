@@ -45,6 +45,11 @@ pub struct ResolvedProvider {
     pub http_proxy: Option<String>,
     /// Provider-level HTTPS-traffic proxy. `None` = inherit global.
     pub https_proxy: Option<String>,
+    /// Shell command whose stdout is the access token (`TokenCommand`).
+    /// Standalone: the Rust kernel executes it; platform: Go injects instead.
+    pub auth_command: Option<String>,
+    /// Token cache TTL seconds (`TokenCommand`); `None` = default 1800.
+    pub token_ttl_secs: Option<u64>,
 }
 
 /// A resolved model route with effective parameter values (model override ??
@@ -168,6 +173,7 @@ fn map_auth(kind: AuthMethodKind) -> AuthMethod {
         AuthMethodKind::Bearer => AuthMethod::Bearer,
         AuthMethodKind::ApiKeyHeader => AuthMethod::ApiKeyHeader,
         AuthMethodKind::QueryKey => AuthMethod::QueryKey,
+        AuthMethodKind::TokenCommand => AuthMethod::TokenCommand,
     }
 }
 
@@ -178,12 +184,17 @@ fn resolve_providers(
 ) -> Result<Vec<ResolvedProvider>, ConfigError> {
     let mut providers = Vec::with_capacity(config.providers.len());
     for (i, p) in config.providers.iter().enumerate() {
-        let key = resolver
-            .resolve(&p.auth.key_ref)
-            .map_err(|e| ConfigError::Secret {
-                path: format!("providers[{i}].auth.key_ref"),
-                source: e,
-            })?;
+        // `TokenCommand` providers have no static key - the token comes from
+        // the auth command; resolve only when a key_ref is present.
+        let key = match p.auth.key_ref.as_deref() {
+            Some(reference) => resolver
+                .resolve(reference)
+                .map_err(|e| ConfigError::Secret {
+                    path: format!("providers[{i}].auth.key_ref"),
+                    source: e,
+                })?,
+            None => SecretString::new(String::new()),
+        };
         providers.push(ResolvedProvider {
             name: p.name.clone(),
             kind: p.kind,
@@ -197,6 +208,8 @@ fn resolve_providers(
             upstream_path: p.upstream_path.clone(),
             http_proxy: p.http_proxy.clone(),
             https_proxy: p.https_proxy.clone(),
+            auth_command: p.auth.command.clone(),
+            token_ttl_secs: p.auth.token_ttl_secs,
         });
     }
     Ok(providers)

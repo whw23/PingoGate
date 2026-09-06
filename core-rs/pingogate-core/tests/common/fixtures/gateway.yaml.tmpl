@@ -38,3 +38,14 @@ providers:
     models:
       - alias: "gemini-1.5-pro"
         upstream_model: "gemini-1.5-pro"
+  - name: "token-cmd-up"
+    kind: "openai-compatible"
+    base_url: "http://127.0.0.1:__MOCK__"
+    auth:
+      method: "token_command"
+      command: "echo e2e-token"
+      token_ttl_secs: 1800
+    capability_families: ["generation.stateless"]
+    models:
+      - alias: "token-cmd-model"
+        upstream_model: "token-cmd-model"

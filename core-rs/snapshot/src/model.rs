@@ -139,7 +139,18 @@ pub struct ModelCfg {
 #[serde(deny_unknown_fields)]
 pub struct AuthCfg {
     pub method: AuthMethodKind,
-    pub key_ref: String,
+    /// Static key reference (`env:VAR` / `plain:...`). `None` for
+    /// `TokenCommand` - the token comes from `command`.
+    #[serde(default)]
+    pub key_ref: Option<String>,
+    /// Shell command whose stdout is the access token (for `TokenCommand`;
+    /// standalone Rust kernel executes it, Go control plane injects in
+    /// platform mode).
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Token cache TTL in seconds (for `TokenCommand`); default 1800.
+    #[serde(default)]
+    pub token_ttl_secs: Option<u64>,
 }
 
 /// Wire form of the upstream auth method (`auth.method` in YAML).
@@ -149,6 +160,7 @@ pub enum AuthMethodKind {
     Bearer,
     ApiKeyHeader,
     QueryKey,
+    TokenCommand,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

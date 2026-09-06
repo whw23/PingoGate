@@ -129,6 +129,11 @@ pub(super) fn build_runtime_snapshot(snap: &Snapshot) -> Result<Arc<RuntimeSnaps
             // snapshot contract; standalone YAML config carries it.
             http_proxy: None,
             https_proxy: None,
+            // Platform mode: `TokenCommand` token exchange is performed by the
+            // Go control plane (future work); the snapshot does not yet carry
+            // the auth command.
+            auth_command: None,
+            token_ttl_secs: None,
         });
     }
 
@@ -219,6 +224,7 @@ fn parse_auth_method(s: &str) -> Result<AuthMethod, String> {
         "bearer" => Ok(AuthMethod::Bearer),
         "api_key_header" => Ok(AuthMethod::ApiKeyHeader),
         "query_key" => Ok(AuthMethod::QueryKey),
+        "token_command" => Ok(AuthMethod::TokenCommand),
         other => Err(format!("unknown auth method: {other}")),
     }
 }

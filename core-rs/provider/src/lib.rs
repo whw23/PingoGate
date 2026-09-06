@@ -23,8 +23,10 @@ pub mod gemini;
 pub mod interactions;
 pub mod openai;
 pub mod responses;
+pub mod token_source;
 pub mod usage;
 
 pub use adapter::ProviderAdapter;
 pub use error_shape::ErrorClass;
+pub use token_source::{CommandTokenSource, TokenError, TokenSource};
 pub use usage::{parse_usage, TokenUsage};

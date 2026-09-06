@@ -14,18 +14,23 @@
 //! release any per-request state (e.g. VirtualKeyAuth's concurrency counter)
 //! at request end via [`KeyAuth::release`](crate::key_auth::KeyAuth::release).
 
-use std::sync::Arc;
-use std::time::Instant;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use pingogate_core_types::{AppError, AuthMethod, Principal, ProtocolKind, RequestContext, TraceId};
-use pingogate_provider::TokenUsage;
-use pingogate_snapshot::RuntimeSnapshot;
+use pingogate_provider::{CommandTokenSource, TokenSource, TokenUsage};
+use pingogate_snapshot::{ResolvedProvider, RuntimeSnapshot};
 
 use crate::auth_filter;
 use crate::key_auth::KeyAuth;
 use crate::upstream_peer::UpstreamTarget;
 use crate::usage_extractor::UsageExtractor;
+
+/// Default token cache TTL for `TokenCommand` auth (Google OAuth tokens live
+/// ~1h; refresh at 30 min to stay safely ahead of expiry).
+const DEFAULT_TOKEN_TTL_SECS: u64 = 1800;
 
 /// Per-request state shared across pipeline phases.
 pub struct GatewayCtx {
@@ -90,6 +95,10 @@ pub struct GatewayCtx {
     /// to Go as `body_ref` when `needs_estimate=true` (no provider usage).
     /// Cleared after the usage push; never persisted (constitution XX).
     pub(crate) request_body_for_usage: Option<Vec<u8>>,
+    /// Lazily-built external token sources, keyed by provider name (for
+    /// `TokenCommand` auth). Standalone: the Rust kernel runs `auth.command`
+    /// (e.g. `gcloud auth application-default print-access-token`).
+    pub(crate) token_sources: RwLock<HashMap<String, Arc<dyn TokenSource>>>,
 }
 
 impl GatewayCtx {
@@ -119,7 +128,34 @@ impl GatewayCtx {
             tokens: None,
             injected_request_body: None,
             request_body_for_usage: None,
+            token_sources: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Return (or lazily build) the token source for a `TokenCommand` provider.
+    /// Cached by provider name so the shell command runs at most once per TTL.
+    pub(crate) fn token_source_for(
+        &self,
+        provider: &ResolvedProvider,
+    ) -> Result<Arc<dyn TokenSource>, AppError> {
+        if let Some(src) = self.token_sources.read().unwrap().get(&provider.name) {
+            return Ok(src.clone());
+        }
+        let command = provider.auth_command.clone().ok_or_else(|| {
+            AppError::Validation {
+                message: format!(
+                    "provider '{}' uses token_command but has no auth.command",
+                    provider.name
+                ),
+            }
+        })?;
+        let ttl = Duration::from_secs(provider.token_ttl_secs.unwrap_or(DEFAULT_TOKEN_TTL_SECS));
+        let src: Arc<dyn TokenSource> = Arc::new(CommandTokenSource::new(command, ttl));
+        self.token_sources
+            .write()
+            .unwrap()
+            .insert(provider.name.clone(), src.clone());
+        Ok(src)
     }
 
     /// Authenticate the presented gateway key via the injected [`KeyAuth`] impl

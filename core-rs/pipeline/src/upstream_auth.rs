@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use pingogate_core_types::{AuthMethod, SecretString};
+use pingogate_provider::TokenSource;
 use pingogate_snapshot::ResolvedProvider;
 use pingogate_storage::{KeyError, KeyVault};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -38,6 +39,8 @@ pub enum UpstreamAuth {
 
 impl UpstreamAuth {
     /// Build the injection plan from a provider's auth method and resolved key.
+    /// `TokenCommand` is handled before this (the token comes from an external
+    /// source, injected as a Bearer header), so it is unreachable here.
     pub fn build(method: AuthMethod, key: &str, anthropic_version: Option<&str>) -> Self {
         match method {
             AuthMethod::Bearer => Self::BearerHeader(format!("Bearer {key}")),
@@ -46,6 +49,9 @@ impl UpstreamAuth {
                 version: anthropic_version.map(|v| v.to_string()),
             },
             AuthMethod::QueryKey => Self::QueryKey(key.to_string()),
+            AuthMethod::TokenCommand => {
+                unreachable!("TokenCommand is resolved before UpstreamAuth::build")
+            }
         }
     }
 
@@ -76,17 +82,21 @@ impl UpstreamAuth {
 
 /// Build the upstream auth plan, branching on mode (constitution XII/XX).
 /// Platform: per-request decrypt of `encrypted_key`. Standalone: env-resolved
-/// plaintext from `provider.key`.
-pub fn build_upstream_auth(
+/// plaintext from `provider.key`. `token_source` is required when the auth
+/// method is `TokenCommand` (external command token).
+pub async fn build_upstream_auth(
     keyvault: &Option<Arc<dyn KeyVault>>,
     provider: &ResolvedProvider,
+    token_source: Option<&dyn TokenSource>,
 ) -> Result<UpstreamAuth> {
     build_upstream_auth_with_method(
         keyvault,
         provider,
         provider.auth_method,
         provider.anthropic_version.as_deref(),
+        token_source,
     )
+    .await
 }
 
 /// Build the upstream auth plan with explicit auth method + anthropic_version
@@ -95,12 +105,25 @@ pub fn build_upstream_auth(
 /// decrypted in platform); the auth *method* and *anthropic_version* can be
 /// overridden per route so a single provider can serve multiple protocols with
 /// different auth styles.
-pub fn build_upstream_auth_with_method(
+pub async fn build_upstream_auth_with_method(
     keyvault: &Option<Arc<dyn KeyVault>>,
     provider: &ResolvedProvider,
     method: AuthMethod,
     anthropic_version: Option<&str>,
+    token_source: Option<&dyn TokenSource>,
 ) -> Result<UpstreamAuth> {
+    // TokenCommand: the access token comes from an external source (standalone:
+    // the Rust kernel runs `auth.command`; platform: the Go control plane
+    // injects it), then injected as a Bearer header.
+    if method == AuthMethod::TokenCommand {
+        let source = token_source.ok_or_else(|| {
+            Error::explain(ErrorType::InternalError, "TokenCommand auth requires a token source")
+        })?;
+        let token = source.access_token().await.map_err(|e| {
+            Error::explain(ErrorType::InternalError, format!("token fetch failed: {e}"))
+        })?;
+        return Ok(UpstreamAuth::BearerHeader(format!("Bearer {token}")));
+    }
     match keyvault {
         Some(kv) => {
             let encrypted = provider.encrypted_key.as_ref().ok_or_else(|| {
@@ -286,5 +309,51 @@ mod tests {
         let _a = UpstreamAuth::build_platform(AuthMethod::Bearer, b"ct", &kv, None).unwrap();
         let _b = UpstreamAuth::build_platform(AuthMethod::Bearer, b"ct", &kv, None).unwrap();
         assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn token_command_injects_bearer_from_source() {
+        use async_trait::async_trait;
+        use pingogate_core_types::ProviderKind;
+        use pingogate_provider::TokenError;
+
+        struct FixedToken(&'static str);
+        #[async_trait]
+        impl TokenSource for FixedToken {
+            async fn access_token(&self) -> Result<String, TokenError> {
+                Ok(self.0.to_string())
+            }
+        }
+
+        let provider = ResolvedProvider {
+            name: "vertex-ai".into(),
+            kind: ProviderKind::Gemini,
+            base_url: "https://aiplatform.googleapis.com".into(),
+            auth_method: AuthMethod::TokenCommand,
+            key: SecretString::new(String::new()),
+            encrypted_key: None,
+            anthropic_version: None,
+            capability_families: vec![],
+            timeout_ms: None,
+            upstream_path: None,
+            http_proxy: None,
+            https_proxy: None,
+            auth_command: Some("gcloud auth application-default print-access-token".into()),
+            token_ttl_secs: None,
+        };
+        let src = FixedToken("ya29-test-token");
+        let auth = build_upstream_auth_with_method(
+            &None,
+            &provider,
+            AuthMethod::TokenCommand,
+            None,
+            Some(&src as &dyn TokenSource),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            auth,
+            UpstreamAuth::BearerHeader("Bearer ya29-test-token".into())
+        );
     }
 }

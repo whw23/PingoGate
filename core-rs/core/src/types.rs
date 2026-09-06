@@ -139,6 +139,12 @@ pub enum AuthMethod {
     Bearer,
     ApiKeyHeader,
     QueryKey,
+    /// Token obtained from an external command (standalone: the Rust kernel
+    /// runs `auth.command` via the shell and injects `Authorization: Bearer
+    /// <token>`; the command is provider-specific so different vendors can
+    /// plug different token strategies). In platform mode the Go control plane
+    /// performs the token exchange and injects the credential instead.
+    TokenCommand,
 }
 
 #[cfg(test)]

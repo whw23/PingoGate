@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::Bytes;
-use pingogate_core_types::{AppError, TraceId, TRACE_HEADER};
+use pingogate_core_types::{AppError, AuthMethod, TraceId, TRACE_HEADER};
 use pingogate_snapshot::SnapshotHolder;
 use pingogate_storage::KeyVault;
 use pingora::http::{RequestHeader, ResponseHeader};
@@ -172,12 +172,27 @@ impl ProxyHttp for GatewayProxy {
         // default. The key is still the provider's key.
         let effective_auth_method = ctx.route_auth_override.unwrap_or(provider.auth_method);
         let effective_anthropic_version = ctx.route_anthropic_version.as_deref();
+        // TokenCommand auth: obtain (lazily building + caching) the provider's
+        // external token source so the shell command runs at most once per TTL.
+        let token_source = if effective_auth_method == AuthMethod::TokenCommand {
+            let src = ctx.token_source_for(provider).map_err(|e| {
+                Error::explain(
+                    ErrorType::InternalError,
+                    format!("token source unavailable: {e}"),
+                )
+            })?;
+            Some(src)
+        } else {
+            None
+        };
         let auth = crate::upstream_auth::build_upstream_auth_with_method(
             &self.keyvault,
             provider,
             effective_auth_method,
             effective_anthropic_version,
-        )?;
+            token_source.as_deref(),
+        )
+        .await?;
         wire::apply_upstream_auth(upstream_request, auth, &mut path)?;
         if let Some(host) = host {
             upstream_request.insert_header("host", host.as_str())?;
